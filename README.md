@@ -16,15 +16,14 @@ It is designed for AI engineers and architects who need both the end-to-end stac
 ## Project structure
 
 ```text
-apps/inference-landscape/
-├── index.html             # Page metadata and Vite entry point
-├── src/
-│   ├── catalog.js          # Editorial layer and tool catalog
-│   ├── main.js             # Rendering, URL state, and interactions
-│   ├── state.js            # Shareable selection state helpers
-│   └── styles.css          # Responsive presentation system
-├── public/og.png           # Social sharing image
-└── test/                   # Catalog and state behavior tests
+index.html                  # Page metadata and Vite entry point
+src/
+├── catalog.js               # Editorial layer and tool catalog
+├── main.js                  # Rendering, URL state, and interactions
+├── state.js                 # Shareable selection state helpers
+└── styles.css                # Responsive presentation system
+public/og.png                # Social sharing image
+test/                        # Catalog and state behavior tests
 ```
 
 ## Requirements
@@ -55,7 +54,7 @@ npm run build
 ## Deployment and analytics
 
 1. Import the repository into Vercel.
-2. Set the Vercel project root directory to `apps/inference-landscape`.
+2. Keep the Vercel project root directory at the repository root (the default) — this project is not nested in a monorepo subdirectory.
 3. Keep Vercel’s detected Vite settings: build command `npm run build`; output directory `dist`.
 4. Enable **Web Analytics** from the Vercel project’s **Analytics** page.
 5. Optionally attach a custom domain from Vercel project settings.

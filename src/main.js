@@ -25,6 +25,11 @@ const modeDetails = {
   },
 };
 
+const statusCopy = {
+  maintenance: 'Maintenance — included for architectural context',
+  archived: 'Archived — no longer maintained; included for architectural context',
+};
+
 const primaryFlow = ['input', 'gateway', 'distributed', 'response-cache', 'kv-cache', 'serving', 'runtime'];
 const secondaryFlow = ['managed'];
 const memoryTiers = [
@@ -92,7 +97,7 @@ function escapeHtml(value) {
 function renderTool(tool) {
   const compatible = isCompatible(tool, state.mode);
   const selected = tool.id === state.toolId;
-  const status = tool.status === 'maintenance' ? '<span class="status-dot" aria-label="Maintenance status"></span>' : '';
+  const status = statusCopy[tool.status] ? `<span class="status-dot" aria-label="${tool.status[0].toUpperCase()}${tool.status.slice(1)} status"></span>` : '';
   return `
     <div class="tool-card">
     <button
@@ -192,7 +197,7 @@ function renderToolInspector(tool) {
     <dl class="tool-details">
       <div><dt>Choose when</dt><dd>${escapeHtml(tool.chooseWhen)}</dd></div>
       <div><dt>Hardware</dt><dd>${escapeHtml(support)}</dd></div>
-      <div><dt>Catalog status</dt><dd>${tool.status === 'maintenance' ? 'Maintenance — included for architectural context' : 'Active'}</dd></div>
+      <div><dt>Catalog status</dt><dd>${statusCopy[tool.status] || 'Active'}</dd></div>
       <div><dt>Last reviewed</dt><dd>${tool.lastReviewed}</dd></div>
     </dl>
     <div class="inspector-footer">

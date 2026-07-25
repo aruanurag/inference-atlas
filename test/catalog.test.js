@@ -33,5 +33,5 @@ test('catalog separates GPU-only engines from CPU-capable local runtimes', () =>
   assert.deepEqual(byId.get('sglang').supportedHardware, ['gpu']);
   assert.ok(byId.get('llama-cpp').supportedHardware.includes('cpu'));
   assert.ok(byId.get('openvino-genai').supportedHardware.includes('cpu'));
-  assert.equal(byId.get('tgi').status, 'maintenance');
+  assert.equal(byId.get('tgi').status, 'archived');
 });
