@@ -1,15 +1,21 @@
 # Inference Atlas
 
-Inference Atlas is an interactive, static map of the AI inference landscape. It follows a request through input efficiency, gateways, fleet control, response and KV caching, serving engines, runtimes, managed endpoints, and observability.
+Inference Atlas is an interactive, visual map of the AI inference landscape — the tools, platforms, and primitives that carry a request through input efficiency, gateways, fleet control, response and KV caching, serving engines, runtimes, managed endpoints, and observability.
 
-It is designed for AI engineers and architects who need both the end-to-end stack and the relationships between individual tools.
+This is an **educational landscape, not a production tool selector**. It exists to help engineers and architects build a mental model of the inference stack: what each layer does, how tools relate to one another, and how the ecosystem fits together across both GPU and CPU/edge deployments.
+
+## Community-sourced
+
+The AI inference ecosystem moves fast, and no single maintainer can track it alone. Inference Atlas is built to grow with the community: as new tools emerge, gain real-world traction, or become widely adopted, they get added or updated in the catalog.
+
+**Contributions are welcome and encouraged.** If you know a tool that belongs here, spot a stale entry, or can improve the guidance for a layer, please open a pull request — see [Contributing](#contributing) below.
 
 ## What the site includes
 
 - A GPU/CPU-and-edge path switch that highlights compatible components.
 - Nine selectable architecture layers with guided explanations of what each layer does and where it fits.
 - A selectable KV-cache memory ladder: GPU HBM, CPU DRAM, NVMe/object storage, and remote KV fabric.
-- A curated catalog of 69 open-source projects, platforms, primitives, and managed services.
+- A curated, community-maintained catalog of open-source projects, platforms, primitives, and managed services.
 - Official reading links for every tool and architecture layer.
 - Vercel Web Analytics for anonymous traffic insights; no application backend, database, authentication, cookies, or custom interaction events.
 
@@ -33,7 +39,7 @@ test/                        # Catalog and state behavior tests
 
 ## Run locally
 
-From this directory:
+The app lives at the root of this repository — there's no nested subdirectory to `cd` into.
 
 ```bash
 npm install
@@ -55,8 +61,8 @@ npm run build
 
 1. Import the repository into Vercel.
 2. Keep the Vercel project root directory at the repository root (the default) — this project is not nested in a monorepo subdirectory.
-3. Keep Vercel’s detected Vite settings: build command `npm run build`; output directory `dist`.
-4. Enable **Web Analytics** from the Vercel project’s **Analytics** page.
+3. Keep Vercel's detected Vite settings: build command `npm run build`; output directory `dist`.
+4. Enable **Web Analytics** from the Vercel project's **Analytics** page.
 5. Optionally attach a custom domain from Vercel project settings.
 
 Vercel Web Analytics provides anonymous visitor, page-view, referrer, geography, device, and browser insights. This project deliberately does not send custom interaction events or collect visitor-identifying application data.
@@ -78,14 +84,14 @@ Layer records also define the diagram order, layer guide, stack position, and la
 ### Editorial standards
 
 - Prefer official documentation and source repositories over third-party roundups.
-- Add only established, relevant tools; the catalog is curated, not a live popularity index.
-- Mark maintenance-only projects clearly rather than presenting them as new recommendations.
+- Add tools once they've gained real-world traction or adoption in the ecosystem — this keeps the atlas current without turning it into an unfiltered popularity list.
+- Mark maintenance-only or superseded projects clearly rather than presenting them as new recommendations.
 - Avoid unsupported benchmark claims, vendor logos, and implied endorsements.
-- Keep wording factual, concise, and useful for an architecture decision.
+- Keep wording factual, concise, and useful for building understanding of the stack.
 
 ## Contributing
 
-Contributions are welcome for factual corrections, missing high-impact projects, clearer guidance, accessibility improvements, and visual refinements.
+This project runs on community contributions — adding a new tool, fixing a stale entry, or clarifying a layer's guidance are all welcome, no matter how small.
 
 1. Create a focused branch from the latest default branch.
 2. Keep each pull request limited to one concern: catalog curation, interaction behavior, visual design, documentation, or validation.
@@ -96,6 +102,8 @@ Contributions are welcome for factual corrections, missing high-impact projects,
 
 Do not commit `node_modules`, `dist`, credentials, analytics tokens, or generated local caches. The project requires no runtime secrets.
 
+New to the project? Adding or updating a single catalog entry in `src/catalog.js` is a great first contribution.
+
 ## Reporting issues
 
 When reporting a catalog or visual issue, include:
@@ -105,4 +113,4 @@ When reporting a catalog or visual issue, include:
 - A source link for factual corrections
 - A screenshot and viewport size for layout defects
 
-This helps keep the atlas accurate, readable, and useful as the inference ecosystem evolves.
+This helps keep the atlas accurate, readable, and useful as the inference ecosystem evolves — and it's exactly the kind of input that keeps this a living, community-driven map rather than a static snapshot.
