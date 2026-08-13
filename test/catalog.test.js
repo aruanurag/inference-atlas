@@ -2,9 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { layers, tools } from '../src/catalog.js';
 
-test('catalog contains the reviewed 69 unique, complete entries', () => {
-  assert.equal(tools.length, 69);
-  assert.equal(new Set(tools.map((tool) => tool.id)).size, 69);
+test('catalog contains the reviewed 70 unique, complete entries', () => {
+  assert.equal(tools.length, 70);
+  assert.equal(new Set(tools.map((tool) => tool.id)).size, 70);
 
   for (const tool of tools) {
     assert.ok(tool.id);
