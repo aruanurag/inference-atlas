@@ -1,0 +1,1306 @@
+{
+  "id": "r5oec",
+  "title": "Understanding Cold Starts in LLM Inference",
+  "author": "Anurag Mohan",
+  "date": "September 15, 2026",
+  "url": "https://www.linkedin.com/pulse/understanding-cold-starts-llm-inference-anurag-mohan-r5oec",
+  "blocks": [
+    {
+      "links": [],
+      "text": "Understanding Cold Starts in LLM Inference",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "In the last few articles, I have been thinking about autoscaling, routing, KV cache, and distributed inference.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Autoscaling sounds straightforward:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Traffic increases\n↓\nAdd another replica\n↓\nMore capacity",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "But there is an important gap hidden inside this picture.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "We decided that we need\nanother inference replica.\n\nHow long before that replica\ncan actually generate tokens?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That gap is the cold start.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "And with LLM inference, starting a replica can mean much more than simply starting a container.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What exactly is a cold start?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "A cold start is the work required to turn inactive capacity into a model that is actually ready to serve inference requests.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For an LLM server, that can look roughly like this:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Get a machine\n↓\nStart the container\n↓\nStart the inference runtime\n↓\nFind and load the model weights\n↓\nMove the weights onto the GPU\n↓\nPrepare GPU memory and execution\n↓\nWarm up the engine\n↓\nStart serving requests",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "I had seen diagrams like this before.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But terms such as initialize runtime or load model weights do not explain much by themselves.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So what is actually happening?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What does “get infrastructure” mean?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Suppose Kubernetes decides that another model-server pod is required.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "If an existing node has enough free GPU capacity, Kubernetes can schedule the pod there.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But imagine every GPU is already occupied.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Now the new pod remains pending.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The cluster autoscaler may then ask the cloud provider for another GPU machine.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That means the cloud has to do things such as:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "allocate the VM or bare-metal machine\n↓\nboot the operating system\n↓\ninitialize networking\n↓\nattach required storage\n↓\nstart Kubernetes components\n↓\nregister the node with the cluster",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Only after that can Kubernetes place the model-server pod on it.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So sometimes the biggest cold start has nothing to do with the model yet.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The machine itself did not exist.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What happens during a container cold start?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Now assume the machine exists.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Kubernetes wants to start something like a vLLM model-server container.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "First it needs the container image.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "If the image is already cached on that node, this can be relatively quick.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But if it is not cached:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Container Registry\n↓\ndownload image layers\n↓\nunpack them onto the node\n↓\ncreate the container\n↓\nstart the inference process",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "A large inference image may contain Python, CUDA libraries, PyTorch, the inference engine, and many other dependencies.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So downloading and unpacking the image itself can take time.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This is why:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Pod created",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "does not mean:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Model ready",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The application has only started its journey.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What does “initialize the runtime” actually mean?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Now the inference program starts.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For example, imagine we started vLLM.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Before it can generate anything, the program has to understand the environment it is running in.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It may need to:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Read the model configuration.\nLoad the tokenizer configuration.\nDetect available GPUs.\nInitialize CUDA.\nDecide how the model will be split if multiple GPUs are used.\nCreate communication between GPU workers.\nWork out how much memory can be used for KV cache.\nCreate internal schedulers and memory managers.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So when I say:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "initialize inference runtime",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "I really mean:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Build all the machinery\nthat will run the model.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The weights are only one part of that machinery.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why does CUDA initialization take time?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The GPU is physically present, but our process cannot simply start sending matrix multiplications to it.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The CUDA runtime first needs to establish the application's connection to the GPU.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Conceptually:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Inference process\n↓\nCUDA runtime / driver\n↓\nGPU",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The process needs GPU contexts, memory management structures, streams, and other runtime resources.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "If we are using several GPUs, the engine also has to make those workers aware of each other.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For tensor parallel inference, for example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "GPU 0 ←→ GPU 1 ←→ GPU 2 ←→ GPU 3",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Parts of every layer may be distributed across those GPUs.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "They therefore need communication channels before inference can work correctly.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This is one reason a distributed replica has more startup work than a simple single-GPU process.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What does “load the model weights” mean?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "This was one phrase I wanted to understand more clearly.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A model is ultimately stored as files somewhere.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Model repository\nObject Storage\nNetwork filesystem\nLocal SSD",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Those files contain billions of learned parameter values.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "When we start the inference server, those parameters must become available to the inference process.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "There are two very different situations.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The model is already stored locally",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Then there may be no internet or object-storage download at all.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The engine reads the model files from local disk.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Local SSD\n↓\nInference process",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The model is not available locally",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Now it may first need to come across the network.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Model repository / Object Storage\n↓\nNetwork\n↓\nNode storage or memory",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So when someone says:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Model loading took 60 seconds.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "I now want to ask:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Was the model already local?\n\nOr did we spend most of that\ntime downloading it?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Those are very different problems.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What does “read model files” mean?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Suppose the model is already on an NVMe disk.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The model might still be tens or hundreds of gigabytes.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The storage device has to read all those bytes.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Very roughly:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "100 GB model\n\nStorage reads at 2 GB/s\n\nEven perfect sequential reading\nwould take about 50 seconds.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Real systems are more complicated, but the intuition is useful.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Large-model startup is partly a data movement problem.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The GPU can be incredibly fast at matrix multiplication and still sit waiting for the model to arrive.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What does “deserialize the weights” mean?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The model file is just stored data.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Something like:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "model.safetensors",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "contains parameter values plus information describing what those values represent.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The runtime needs to turn that stored representation into tensors that the model code can use.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Conceptually:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Bytes inside model file\n\n↓ interpret them as\n\nTensor:\nshape = 4096 × 4096\ndtype = FP16\nbelongs to layer 12",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That conversion from stored model representation into usable tensor structures is what people mean by deserialization.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It is not the model “learning” anything.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "We are simply rebuilding the model from its saved representation.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What does “allocate memory” mean?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Before putting model weights onto a GPU, the runtime needs space to put them.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Imagine the GPU has:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "80 GB HBM",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The inference engine has to divide that memory among things such as:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Model weights\nKV cache\nTemporary computation buffers\nRuntime overhead",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So the engine reserves memory for these different purposes.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "80 GB GPU\n\n50 GB → model\n24 GB → KV cache\n6 GB  → runtime/workspace",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The actual numbers vary significantly, but this is the idea.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This is another reason model startup is not simply:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "copy file → GPU",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The engine first has to construct the memory environment in which inference will happen.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What does “copy the weights to the GPU” mean?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Eventually those parameter values need to be accessible by the GPU.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A simplified path might be:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "SSD\n↓\nCPU memory\n↓\nPCIe\n↓\nGPU HBM",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Different runtimes can optimize this path, so it is not always exactly this sequence.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But something fundamental remains true:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Large amounts of data\nhave to move.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "If 100 GB of weights need to cross a connection, the bandwidth of that connection matters.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This is why cold-start performance can depend on:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "storage speed\nnetwork speed\nPCIe bandwidth\nmodel size\nnumber of GPUs\nmodel format",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "not simply GPU FLOPS.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What does “initialize tensors” mean?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Once the weight data is available, the framework has to associate it with the correct parts of the neural network.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Layer 0 attention weights\nLayer 0 MLP weights\n\nLayer 1 attention weights\nLayer 1 MLP weights\n\n...",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "If tensor parallelism is being used, the runtime may also need to determine which GPU owns which portion.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Weight matrix\n\nGPU 0 → shard 1\nGPU 1 → shard 2\nGPU 2 → shard 3\nGPU 3 → shard 4",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The model is effectively being reconstructed in the form required for execution.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What does “prepare the inference engine” mean?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Now we have the model.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But the engine still needs infrastructure around it.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Take vLLM as an example.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It needs things such as:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Scheduler\nKV Cache Manager\nGPU Workers\nModel Executor\nPagedAttention structures",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The scheduler needs to know how requests will be batched.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The KV Cache Manager needs memory blocks it can assign to requests.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "GPU workers need to be initialized.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The model executor needs to know how computation will be launched.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Weights loaded",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "still does not necessarily mean:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Inference engine completely ready",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Why does the engine sometimes run a warm-up?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Suppose everything is loaded.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The engine may still execute one or more test requests before declaring itself fully ready.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Because the first execution may trigger additional setup.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Depending on the runtime, this can include things such as:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "loading or compiling GPU kernels\nbuilding execution paths\ncapturing CUDA graphs\ncreating temporary buffers\ntesting memory usage",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Think of it almost like starting a car.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The engine exists.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The fuel is there.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But we still start the engine before driving onto the highway.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A warm-up request lets the system exercise the important inference path before a real user does.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So where does cold-start time actually go?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Now the picture is much easier for me to understand.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Need capacity\n↓\nMaybe create a machine\n        infrastructure time\n\n↓\nMaybe download the container\n        image/network time\n\n↓\nStart inference application\n        process/runtime time\n\n↓\nMaybe download model\n        network/storage time\n\n↓\nRead model files\n        storage time\n\n↓\nBuild tensors and model structure\n        CPU/runtime work\n\n↓\nMove model onto GPUs\n        memory-transfer time\n\n↓\nInitialize GPU workers\n        CUDA/distributed setup\n\n↓\nReserve KV cache and workspaces\n        memory setup\n\n↓\nWarm up execution\n        kernels/graphs/runtime work\n\n↓\nReady",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Now “cold start” no longer feels like one mysterious number.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It is the sum of several different startup costs.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Is a cold KV cache the same thing?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "No, and I think this distinction is especially important.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Suppose the server has finished everything above.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The model is loaded.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The engine is ready.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It can serve traffic.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But imagine a request arrives with a large system prompt the replica has never processed.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The model is warm.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The prefix cache is cold.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So the complete prefill still needs to happen.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Model warm\n+\nPrefix cache cold",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Later, if another request uses the same reusable prefix:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Model warm\n+\nPrefix cache warm",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The server may avoid repeating some of that prefill work.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So I now separate these two ideas:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Model cold start\n=\nHow long until I can serve?\n\nCache coldness\n=\nHow much useful inference state\nhave I already built?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "What happens when autoscaling adds a new replica?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "This connects cold starts directly with my previous articles on KV-cache-aware routing.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Imagine:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Replica A\nReplica B",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "have been serving traffic for an hour.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "They may already contain useful prefix-cache state.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Traffic increases.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Autoscaling creates:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Replica C",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Replica C first pays its startup cost.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Then it becomes Ready.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But Replica C may still have almost no useful cached prefixes.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Now a request arrives.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Replica A might have:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "longer queue\n+\nuseful prefix already cached",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Replica C might have:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "empty queue\n+\ncold prefix cache",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Which one should the router choose?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Now routing is no longer simply:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Send traffic to\nthe least busy replica.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The router may be balancing:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "queue depth\n+\ncache locality\n+\navailable memory\n+\nreplica readiness",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That is why inference-aware routing becomes so interesting.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How does this become even harder with model routing?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Now imagine the router is not just choosing between replicas of the same model.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It can choose between completely different models.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Small Model\n→ already running\n\nLarge Model\n→ currently scaled to zero",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "A complex request arrives.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Maybe the large model would produce the better result.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But choosing it could mean:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Start infrastructure\n↓\nStart container\n↓\nLoad large model\n↓\nInitialize GPUs\n↓\nWarm engine\n↓\nFinally run request",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So the routing decision is no longer only:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Which model is best?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "It can become:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Which model is good enough?\n\nWhich model is already warm?\n\nHow much will starting another\nmodel delay this request?\n\nIs that extra quality\nworth the startup latency?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "And there is another issue.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Suppose a conversation started on Model A.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Then halfway through we route it to Model B.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Even if Model B is already running, Model B does not magically inherit Model A's KV cache.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It will usually need to process the conversation context itself.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So switching models can introduce another cost:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Model routing\n↓\nDifferent model\n↓\nExisting KV state cannot simply be reused\n↓\nContext needs prefill again",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This makes model routing very different from ordinary HTTP load balancing.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A request carries useful computational history with it.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why does this matter so much for autoscaling?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Because the autoscaler can make the correct decision and users can still experience poor latency.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "10:00:00\nTraffic spike begins\n\n10:00:10\nAutoscaler detects it\n\n10:00:15\nNew replica requested\n\n10:01:30\nReplica finally becomes ready",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The autoscaler worked.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But there was still more than a minute during which demand exceeded available serving capacity.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That leads to the metric I find most useful here:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Time to Usable Capacity",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Not:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How quickly did Kubernetes\ncreate a pod?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "But:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How long after deciding\nthat I need more capacity\n\ndid I actually get a model\ncapable of generating tokens?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "What is the key intuition?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Cold start is really about turning:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Potential capacity",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "into:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Usable inference capacity",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "And that requires much more than simply starting a process.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Infrastructure\n↓\nSoftware\n↓\nModel weights\n↓\nGPU memory\n↓\nInference runtime\n↓\nReady",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Then, even after the model is Ready:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Cache state builds over time.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That gives me two different warm-up problems to think about:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Can this replica serve?\n\nand\n\nCan this replica serve efficiently\nusing the state it has already built?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Both matter for autoscaling and routing.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What comes next?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Understanding the cold-start path immediately creates the next question:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Which of these steps\ncan we eliminate,\nhide,\nor make faster?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "For example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Do we keep GPU nodes warm?\n\nDo we pre-pull container images?\n\nCan model weights already be\ncached on local NVMe?\n\nShould we keep minimum replicas?\n\nCan models be loaded before\ntraffic arrives?\n\nCan scaling be predictive\ninstead of reactive?\n\nCan we stream weights differently?\n\nCan warm pools help?\n\nShould small and large models\nuse different scaling strategies?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So that is where I want to go next:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How Do We Reduce Cold Starts in LLM Inference?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Not just a list of optimizations, but understanding which part of the cold-start path each technique actually removes — and what we pay for it.",
+      "type": "paragraph"
+    }
+  ],
+  "images": [],
+  "bodyHash": "c7a56d38a2b7fc2b48201b0cb49be1a35b1c001e1f4e71389b81f218ab0d61d8"
+}

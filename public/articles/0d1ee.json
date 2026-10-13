@@ -1,0 +1,1116 @@
+{
+  "id": "0d1ee",
+  "title": "LLM Inference Challenges: Understanding vLLM Architecture",
+  "author": "Anurag Mohan",
+  "date": "June 16, 2026",
+  "url": "https://www.linkedin.com/pulse/llm-inference-challenges-understanding-vllm-anurag-mohan-0d1ee",
+  "blocks": [
+    {
+      "links": [],
+      "text": "LLM Inference Challenges (Part 13)",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Understanding vLLM Architecture",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "In the previous parts, we explored two very important ideas:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Continuous Batching\nand\nPagedAttention",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Continuous batching helped us understand how modern inference systems keep GPUs busy during decode.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "PagedAttention helped us understand how KV cache memory can be managed efficiently while requests are constantly entering, growing, and leaving.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "At this point, we understand the individual pieces better.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But one question still remains:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How does a real inference engine\ncombine all of this together? ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That leads us to vLLM.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why talk about vLLM now?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Until now, we have been mostly learning concepts one by one.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "We explored:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "KV cache\nbatching\nprefill vs decode\ncontinuous batching\nPagedAttention\nmulti-GPU inference\nrequest routing\nGPU communication ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "These are all important. But in real systems, these ideas do not exist separately. They come together inside an inference engine. vLLM is one of the most important open-source examples of this. So this article is not about every detail inside vLLM. Instead, the goal is simpler:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Build a mental model of how vLLM works as a serving engine. ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "I want to understand where the major pieces fit before jumping into code.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is vLLM?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "At a high level, vLLM is an LLM inference and serving engine.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That means it helps run language models efficiently for real user requests. ",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A user sends a prompt. ",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "vLLM receives it.\nvLLM schedules it.\nvLLM runs the model.\nvLLM manages KV cache.\nvLLM streams tokens back.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So instead of thinking of vLLM as only:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "a library to run an LLM ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "I think it is better to view it as:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "a runtime system for serving LLM requests efficiently ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That word “runtime” is important. Because vLLM is not just executing one model call. It is continuously managing many requests at the same time.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What problem is vLLM trying to solve?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "LLM inference is difficult because requests are dynamic.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "One user may send a short prompt.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Another user may send a long prompt.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "One request may generate 10 tokens.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Another may generate 1000 tokens.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Some requests finish early.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Some keep running.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Some are waiting.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Some are in prefill.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Some are in decode.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "At the same time, the system must manage:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "GPU memory\nKV cache blocks\nbatching\nscheduling\nlatency\nthroughput\ntoken streaming ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So vLLM is not only asking:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How do I run the model? ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "It is also asking:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Which requests should run now?\nHow much memory do they need?\nCan more requests enter?\nWhich requests have finished?\nHow do we keep GPUs busy?\nHow do we avoid wasting KV cache memory? ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This is why vLLM architecture matters.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What are the major pieces inside vLLM?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "At a high level, we can think of vLLM as having a few major parts:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "API Server\nRequest Queue\nEngine Core\nScheduler\nKV Cache Manager\nModel Executor\nGPU Workers\nPagedAttention\nOutput Processor ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This may sound like a lot.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But the flow is actually understandable if we follow one request.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What happens when a request arrives?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Suppose a user sends:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "\"Explain quantum computing in simple terms\" ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The request first reaches the serving layer. In vLLM, this is usually the API server. The API server is responsible for things like:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "receiving the request\nparsing the input\ntokenizing the prompt\nsending work to the engine\nstreaming generated tokens back ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So the API server is the entry point. But the API server itself is not the main brain of inference scheduling. The request must move into the engine. A simple view looks like this:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "User\n ↓\nAPI Server\n ↓\nEngine Core\n ↓\nScheduler\n ↓\nGPU Workers\n ↓\nGenerated Tokens ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "What is the engine core?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The engine core is where the main inference loop lives.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This is where vLLM keeps track of active requests, waiting requests, scheduled work, KV cache usage, and model execution.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A useful mental model is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "API Server = receives and returns requests\n\nEngine Core = decides how inference work runs ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The engine core is not just passively forwarding requests. It is continuously making scheduling decisions.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It asks:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Which requests are waiting?\nWhich requests are already running?\nWhich requests need prefill?\nWhich requests are decoding?\nWhich requests finished?\nHow many tokens can we process now?\nIs there enough KV cache memory? ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This is where inference starts feeling like a runtime scheduling system.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What does the scheduler do?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The scheduler is one of the most important parts of vLLM. It decides which requests get executed in each step. Earlier, when we discussed continuous batching, we learned that batches are not fixed. ",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Requests enter.\nRequests leave.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The active set keeps changing. The scheduler manages that process. A simple scheduler loop looks like this:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Check waiting requests\nCheck active requests\nCheck available KV cache\nChoose what runs next\nSend work to GPU workers\nReceive outputs\nUpdate request states\nRepeat ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This is why continuous batching belongs naturally inside vLLM.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The scheduler is the component that makes continuous batching practical.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How does this connect to prefill and decode?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Every request usually goes through two broad phases:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Prefill\nDecode ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "During prefill, the prompt is processed. The system creates the initial KV cache for the prompt tokens.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Prompt tokens:\n[T1, T2, T3, T4]\n\nPrefill creates:\nKV cache for T1, T2, T3, T4 ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "After prefill, decode begins. During decode, the model generates one token at a time.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Decode step 1 → generate next token\nDecode step 2 → generate next token\nDecode step 3 → generate next token ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The scheduler must manage both types of work. That is not trivial. Prefill can be large and compute-heavy. Decode is smaller, repeated, and latency-sensitive. So the scheduler must balance:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "new requests waiting for first token ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "with:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "active requests waiting for next token ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This is where metrics like time to first token and inter-token latency start to make more sense.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Where does KV cache management happen?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Every active request needs KV cache. During prefill, vLLM creates KV cache entries for the prompt. During decode, vLLM appends new KV entries token by token. So memory must be managed continuously. ",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Request A enters → allocate KV cache\nRequest A prefills → store prompt KV\nRequest A decodes → append new KV\nRequest A finishes → free KV cache ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "But vLLM does not want to allocate one huge continuous memory region for every request. That would waste memory. This is where the KV cache manager and PagedAttention become important.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Where does PagedAttention fit?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "PagedAttention is the memory idea behind efficient KV cache storage. Instead of storing each request’s KV cache as one large continuous block, the KV cache is divided into smaller blocks.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A request sees a logical sequence:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Token 1\nToken 2\nToken 3\nToken 4 ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "But physically, its KV cache blocks may live in different places in GPU memory.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Logical KV blocks:\n[A0][A1][A2]\n\nPhysical memory:\n[A1][B0][free][A0][C0][A2] ",
+      "type": "code"
+    },
+    {
+      "links": [
+        {
+          "text": "Part 12 and vLLM architecture",
+          "url": "https://www.linkedin.com/pulse/llm-inference-challenges-understanding-anurag-mohan-sokpe"
+        }
+      ],
+      "text": "The system keeps track of where the blocks are. So the request can still use its KV cache correctly, even if the physical memory is not continuous. This is the bridge between Part 12 and vLLM architecture.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "PagedAttention is not floating separately.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It supports the scheduler by making KV cache allocation more flexible.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why does the scheduler need the KV cache manager?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The scheduler cannot simply admit every request. Before adding more work, it must know whether there is enough KV cache space.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Waiting requests:\nE, F, G\n\nActive requests:\nA, B, C, D\n\nFree KV blocks:\nlimited ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The scheduler must ask:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Can E fit?\nCan F fit?\nShould G wait?\nDo active requests need more blocks?\nDid any request finish and free blocks? ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So scheduling and memory management are tightly connected. This is a key idea.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "In LLM inference, scheduling is not only about compute. It is also about memory.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What are GPU workers?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Eventually, the work must run on GPUs. That is where GPU workers come in.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A simple mental model is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Engine Core\n ↓\nGPU Workers\n ↓\nModel Execution ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The engine core decides what should run. The GPU workers execute model computation. They load model weights, run forward passes, and manage GPU-side execution. If there are multiple GPUs, vLLM may use distributed execution strategies such as tensor parallelism.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But for this article, the important idea is simple:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Scheduler decides the work.\nGPU workers execute the work. ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "What happens during one inference step?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Let us simplify one engine step. Suppose the system currently has active requests:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A, B, C ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "And waiting requests:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "D, E ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The scheduler checks:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A needs next decode token\nB needs next decode token\nC needs next decode token\nD needs prefill\nE is waiting ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "It also checks memory:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Are KV cache blocks available?\nCan D be admitted?\nCan active requests continue? ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Then it creates a plan for the next step.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Run decode for A, B, C\nRun prefill chunk for D\nKeep E waiting ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Then the work is sent to GPU workers.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The model runs.\nOutputs come back.\nThe scheduler updates states.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A generated one token\nB generated one token\nC finished\nD completed part of prefill\nC's KV blocks can be freed\nE may enter next step ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Then the loop continues. This is the heart of an inference engine.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How does continuous batching appear inside this loop?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Continuous batching means the active batch can change between generation steps.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "In vLLM, this is naturally handled by the scheduler.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Step 1:\nActive = [A, B, C, D]\n\nStep 2:\nC finishes\nE enters\n\nActive = [A, B, D, E]\n\nStep 3:\nA finishes\nF enters\n\nActive = [F, B, D, E] ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The key idea is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The batch is not frozen.\nThe scheduler keeps updating it. ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This is why vLLM can keep GPUs more fully utilized.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It does not wait for an entire static batch to finish before admitting new work.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How does PagedAttention support this loop?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Continuous batching makes memory dynamic. PagedAttention makes dynamic memory easier to manage. Without PagedAttention, the system may struggle with:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "fragmentation\nover-allocation\nwasted KV cache memory\nlimited active batch size ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "With PagedAttention, vLLM can allocate KV cache in smaller blocks. When a request grows, it gets more blocks. When a request finishes, its blocks return to the free pool. Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A finishes → free A's blocks\nE enters → allocate blocks to E\nB grows → allocate one more block to B ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So the scheduler and memory manager work together. Continuous batching asks:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Can we add more useful work? ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "PagedAttention helps answer:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Do we have memory blocks available for that work? ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "What is the model executor?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The model executor is the part responsible for actually running the model computation.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The scheduler does not itself multiply matrices.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The KV cache manager does not itself generate tokens.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Those components decide what should happen and how memory should be organized.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The model executor runs the forward pass.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A simplified view:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Scheduler\n ↓\nModel Executor\n ↓\nGPU Workers\n ↓\nForward Pass\n ↓\nLogits\n ↓\nSampling\n ↓\nNext Token ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "After the model produces logits, vLLM still needs to choose the next token.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That may involve sampling settings like:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "temperature\ntop-p\ntop-k\nmax tokens\nstop conditions ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Then the generated token is returned to the request state. If streaming is enabled, it can be sent back to the user.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What does the full request lifecycle look like?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Now we can connect the full flow.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "User sends prompt\n ↓\nAPI Server receives request\n ↓\nPrompt is tokenized\n ↓\nRequest enters engine\n ↓\nScheduler decides when it runs\n ↓\nKV cache blocks are allocated\n ↓\nPrefill processes prompt\n ↓\nInitial KV cache is created\n ↓\nRequest enters decode loop\n ↓\nContinuous batching keeps active set full\n ↓\nPagedAttention manages KV cache blocks\n ↓\nGPU workers execute model forward passes\n ↓\nSampler selects next tokens\n ↓\nTokens stream back to user\n ↓\nRequest finishes\n ↓\nKV cache blocks are freed ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This is the mental model I wanted. vLLM is not one single trick. It is a system where many pieces work together.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why is this architecture powerful?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The power comes from combining multiple optimizations into one runtime.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Continuous batching improves GPU utilization.\nPagedAttention improves KV cache memory efficiency.\nThe scheduler coordinates active and waiting requests.\nThe KV cache manager tracks memory availability.\nGPU workers execute the model efficiently.\nThe API server handles client-facing request and response flow.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Together, these pieces turn LLM inference into a managed runtime system.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That is very different from simply calling:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "model.generate() ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Why is this different from a simple inference script?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "In a simple script, we may do:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "load model\nsend prompt\ngenerate output\nreturn response ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That is fine for learning. But production serving is different. A real serving system may have:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "many users\nmany active requests\ndifferent prompt lengths\ndifferent output lengths\nstreaming responses\nGPU memory limits\nparallel GPUs\nlatency targets\nthroughput targets ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So the problem becomes much larger than running one forward pass. The system must operate continuously. This is why vLLM feels more like an operating system for inference workloads.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It manages compute, memory, scheduling, and execution.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What should we not overcomplicate yet?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "At this point, I do not want to dive too deeply into every internal class or source file. That will come later.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For now, the important mental model is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "API Server receives requests.\nEngine Core manages inference.\nScheduler decides what runs.\nKV Cache Manager manages memory.\nPagedAttention stores KV cache efficiently.\nGPU Workers execute model computation.\nTokens are streamed back. ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This is enough to start reading the vLLM codebase more comfortably later. Without this map, the source code can feel overwhelming. With this map, each component has a place.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How do the previous articles connect now?",
+      "type": "heading"
+    },
+    {
+      "links": [
+        {
+          "text": "Part 10",
+          "url": "https://www.linkedin.com/pulse/llm-inference-challenges-understanding-prefill-vs-decode-mohan-tl4fe"
+        }
+      ],
+      "text": "Part 10 explained:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Prefill vs Decode ",
+      "type": "code"
+    },
+    {
+      "links": [
+        {
+          "text": "Part 11",
+          "url": "https://www.linkedin.com/pulse/llm-inference-challenges-understanding-continuous-batching-mohan-i5bre"
+        }
+      ],
+      "text": "Part 11 explained:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Continuous Batching ",
+      "type": "code"
+    },
+    {
+      "links": [
+        {
+          "text": "Part 12",
+          "url": "https://www.linkedin.com/pulse/llm-inference-challenges-understanding-anurag-mohan-sokpe"
+        }
+      ],
+      "text": "Part 12 explained:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "PagedAttention ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Now Part 13 connects them:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "vLLM uses these ideas together\ninside a real inference engine. ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The picture becomes:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Prefill creates KV cache.\nDecode generates one token at a time.\nContinuous batching keeps decode efficient.\nPagedAttention keeps KV cache memory efficient.\nThe scheduler coordinates everything.\nGPU workers execute the model. ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This is the architecture-level understanding.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is the key mental model?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "I would summarize vLLM like this:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "vLLM is a scheduling + memory management + model execution system\nfor high-throughput LLM serving. ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Or even simpler:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "vLLM keeps GPUs busy\nand keeps KV cache memory efficient\nwhile serving many dynamic requests. ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That is the core idea.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why does this article matter?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "This article feels like a transition point. Before this, I was mostly learning separate concepts. Now those concepts are starting to form a system. vLLM gives us a concrete place to connect them. It shows why inference is not only about model architecture. It is also about runtime architecture. The model is important. But the serving engine decides how efficiently that model can serve real users.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What comes next?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Now that the high-level vLLM architecture is clearer, the next step is to go one level deeper.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The most natural next topic is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Inside the vLLM Scheduler ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Because the scheduler is where many important decisions happen:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Which requests enter?\nWhich requests wait?\nHow are prefill and decode balanced?\nHow is the token budget used?\nHow does the system protect latency?\nHow does it keep throughput high?\nHow does it work with KV cache limits? ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "After that, we can go deeper into:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "KV cache block manager\nrequest lifecycle\nchunked prefill\nprefix caching\nrunning vLLM locally\nreading vLLM source code ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "And this is also where I think the series can start becoming more hands-on.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The conceptual foundation is finally strong enough.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Now the next step is to connect this mental model with actual implementation, experiments, and code.",
+      "type": "paragraph"
+    }
+  ],
+  "images": [],
+  "bodyHash": "ae0283c0eabc50a4aa2e85970809d138c5a6fa4258bc3f00ee5530c6290c3b0c"
+}

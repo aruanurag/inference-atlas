@@ -1,0 +1,1551 @@
+{
+  "id": "xjyve",
+  "title": "LLM Inference Challenges -Understanding the Modern AI Inference Stack",
+  "author": "Anurag Mohan",
+  "date": "June 18, 2026",
+  "url": "https://www.linkedin.com/pulse/llm-inference-challenges-understanding-modern-ai-stack-anurag-mohan-xjyve",
+  "blocks": [
+    {
+      "links": [],
+      "text": "LLM Inference Challenges (Part 14)",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Understanding CUDA, vLLM, CPU Inference, Model Routing, and Agentic AI",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "In the previous parts, we explored:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "KV cache\nbatching\nmulti-GPU inference\ndistributed serving\nGPU communication\nprefill vs decode\ncontinuous batching\nPagedAttention\nvLLM architecture ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "At this point, the inference system picture started becoming clearer. But then I started getting confused by another set of questions. ",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Where does CUDA fit? \nWhere does PyTorch fit? \nWhere does vLLM fit? \nWhy are people suddenly talking about CPU inference? \nDoes small model inference mean GPUs become less important? \nHow does model routing work? \nWhere do load balancers fit? \nAnd finally, where does Agentic AI fit in all of this? ",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This article is my attempt to connect all of these ideas into one mental model.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is the first confusion?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The first confusion is usually this:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Is CUDA similar to vLLM?\nIs PyTorch similar to CUDA?\nIs vLLM doing the computation?\nIs the GPU doing the computation? ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "These things are connected, but they are not the same layer.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What actually performs the computation?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The GPU performs the actual computation. The GPU is the hardware. It contains:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "GPU cores\ntensor cores\nHBM memory\ncaches ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "When an LLM runs, the GPU performs operations like:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "matrix multiplication\nattention computation\ntensor operations ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So the GPU is the actual worker.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Then what is CUDA?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "CUDA is NVIDIA’s software platform for programming NVIDIA GPUs. The GPU performs the computation. CUDA provides the software layer that allows programs to tell the GPU what to do. A simple mental model:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "GPU = hardware that performs computation\n\nCUDA = software layer used to control NVIDIA GPUs ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "CUDA helps with:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "launching GPU kernels\nmoving data to GPU memory\nrunning optimized GPU libraries\ncoordinating GPU execution ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So CUDA is not replacing the GPU. CUDA is how software talks to the GPU.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is PyTorch then?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "PyTorch sits above CUDA. When we write:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "torch.matmul(A, B) ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "we are not manually writing CUDA code. PyTorch handles the tensor operation at a higher level. Under the hood, PyTorch may call CUDA libraries, and CUDA then launches work on the GPU. So the stack looks like:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "PyTorch\n  ↓\nCUDA\n  ↓\nGPU ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "PyTorch manages tensors and model execution. CUDA manages GPU execution. The GPU performs the actual math.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Where does vLLM fit?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "vLLM sits even higher. vLLM is not mainly about writing matrix multiplication kernels. vLLM is an inference serving engine. It focuses on:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "request scheduling\ncontinuous batching\nKV cache management\nPagedAttention\nprefill and decode execution\ntoken streaming\nserving many users efficiently ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So vLLM is not competing with CUDA. vLLM uses lower-level systems underneath it. A simplified stack looks like:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Application\n  ↓\nvLLM\n  ↓\nPyTorch / CUDA kernels\n  ↓\nGPU ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "What is the simplest mental model?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "I think about it like this:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "GPU = does the math\n\nCUDA = tells NVIDIA GPU how to do the math\n\nPyTorch = expresses model computation using tensors\n\nvLLM = manages inference serving for many requests ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So when a user sends a prompt, vLLM is not personally multiplying every matrix. vLLM decides what should run and when. Then the model execution happens through lower-level compute layers.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What does vLLM actually manage?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Suppose many users send requests:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Request A\nRequest B\nRequest C\nRequest D ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "vLLM decides:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Which requests enter the batch?\nWhich requests wait?\nWhich requests are in prefill?\nWhich requests are in decode?\nHow much KV cache memory is available?\nWhich requests finished?\nWhich requests can be admitted next? ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That is why I now think of vLLM as:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "a runtime system for LLM inference ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "It is not just:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "run model.generate() ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "It is more like:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "manage many dynamic generation workloads efficiently ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "What is a useful analogy?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Imagine a restaurant. The GPU is the kitchen. CUDA is the kitchen equipment and controls. PyTorch is the chef who knows how to use the equipment. vLLM is the restaurant manager. The restaurant manager does not cook every dish directly. Instead, the manager decides:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "which orders enter\nwhich orders wait\nwhich orders can be grouped\nwhich tables need service\nhow to keep the kitchen busy ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That is very similar to what vLLM does for inference.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why did this matter before talking about CPU inference?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Because once the stack is clear, CPU inference becomes easier to understand. The question is not:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Can CUDA run on CPU? ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "CUDA is NVIDIA GPU-specific. The better question is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Can LLM inference run on hardware other than GPUs? ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "And the answer is yes. Inference can run on:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "GPU\nCPU\nNPU\nintegrated GPU\nedge devices ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "But the engine and optimization strategy may change.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why are people suddenly talking about inference on CPUs?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Because the industry is realizing something important:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Training is usually GPU-heavy.\n\nInference depends on the workload. ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Training large models requires enormous compute. GPUs are extremely important there. But inference is different. Inference happens repeatedly, for every user request. So the question becomes:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Can this request be served cheaper?\nCan it be served locally?\nCan it be served with lower power?\nCan it be served without sending data to the cloud? ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That is where CPU inference and edge inference become interesting.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Does this mean CPUs are replacing GPUs?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "No. That is not the right mental model. The shift is not:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "GPU → CPU ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The shift is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Use the right hardware for the right inference workload. ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Large models, large context windows, and high-throughput serving still heavily benefit from GPUs. But smaller models and simpler tasks may run well enough on CPUs or edge accelerators.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What changed to make CPU inference more practical?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "A few things changed at the same time. First, smaller models became much better. Models like:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "1B\n3B\n7B\n8B ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "can now solve many practical tasks. Second, quantization became much better. Third, CPUs, NPUs, and local AI hardware became more capable. So now the question is not always:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Do we need the biggest model? ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The question becomes:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is the smallest model that can solve this task well enough? ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "What is quantization again?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "A model is mostly weights. Weights are numbers. For example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "0.18342\n-1.28493\n2.91834 ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "If we store each number in FP16, each weight takes:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "16 bits = 2 bytes ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So a 7B model in FP16 needs roughly:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "7 billion × 2 bytes ≈ 14 GB ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "just for weights.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What does quantization do?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Quantization stores approximate versions of those weights using fewer bits. Instead of:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "FP16 ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "we may use:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "INT8\nINT4 ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So memory can shrink like:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "FP16 → 16 bits per weight\nINT8 → 8 bits per weight\nINT4 → 4 bits per weight ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "A rough mental model:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "14 GB in FP16\n≈ 7 GB in INT8\n≈ 3.5 GB in INT4 ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This is one reason smaller models can run on laptops, desktops, and CPU servers.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why does quality not completely collapse?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Because neural networks are often tolerant to small approximation errors. If a weight changes from:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "0.18342 ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "to:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "0.184 ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "the model may still behave similarly. Of course, there is a tradeoff. More aggressive quantization can reduce quality. But for many workloads, the quality loss is acceptable compared to the gain in cost, memory, and deployment flexibility.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Does a small LLM work as well as a large LLM?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Not always. This is important. A small model is not universally as good as a large model. But for many tasks, a small model may be good enough. Examples:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "simple summarization\nclassification\nbasic Q&A\nrouting decisions\ntemplate-based assistance\nlocal assistant tasks ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "For harder reasoning, long context, coding, research, or complex analysis, a larger model may still be needed. So the question becomes:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Which model is good enough for this request? ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This leads directly to model routing.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is model routing?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Model routing means the system decides which model should handle a request. Instead of:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "All requests → Large LLM ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "we get:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Request\n  ↓\nRouter\n  ↓\nBest model for this request ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "For example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Simple question\n  ↓\nSmall model on CPU\n\nComplex reasoning\n  ↓\nLarge model on GPU\n\nResearch task\n  ↓\nSpecialized research model\n\nDocument understanding\n  ↓\nDocument AI service ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The goal is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Use the cheapest model and hardware\nthat can still produce a good answer. ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Is this similar to what we learned about replicas?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Yes, but at a different level. Earlier we learned:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Load Balancer\n  ↓\nReplica 1\nReplica 2\nReplica 3 ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That was mostly about distributing requests across replicas of the same service. Model routing is higher level. It asks:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Which service or model should handle this request? ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Then load balancing happens inside that chosen service.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Does vLLM do this routing?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Usually, no. vLLM has an internal scheduler. That scheduler decides:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "which requests run now\nwhich requests wait\nhow batching works\nhow KV cache is allocated ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "But vLLM is usually not the outer system deciding:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Should this request go to a CPU model?\nShould it go to a GPU model?\nShould it go to a research model?\nShould it go to a document model? ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That outer decision is usually handled by a router or AI gateway above the inference engine.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So does the router replace the load balancer?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "No. This was an important clarification for me. The router and the load balancer solve different problems. The router decides:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "WHAT should handle the request? ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The load balancer decides:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "WHERE exactly should the request go? ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So the router chooses the service. The load balancer chooses the replica.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What does this architecture look like?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "A useful production mental model is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "User\n  ↓\nAPI Gateway\n  ↓\nAI Router\n  ├── Small Model Service\n  │       ↓\n  │   Load Balancer\n  │       ↓\n  │   CPU Replicas\n  │\n  ├── Large LLM Service\n  │       ↓\n  │   Load Balancer\n  │       ↓\n  │   GPU Replicas\n  │\n  ├── Research Model Service\n  │       ↓\n  │   Load Balancer\n  │       ↓\n  │   GPU Replicas\n  │\n  └── Document Understanding Service\n          ↓\n      Load Balancer\n          ↓\n      Replicas ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This matches the mental model I was trying to build. The router is not simply replacing the load balancer. The router sits above multiple model services. Each service may still have its own load balancer and replicas.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What does the router use to make decisions?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The router may use:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "rules\nmetadata\nprompt length\nuser tier\ncost limits\nprivacy requirements\nlatency targets\nmodel availability ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "It may also use a small model or classifier. For example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Request\n  ↓\nSmall router model\n  ↓\nClassify request complexity\n  ↓\nChoose destination ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "What is a model cascade?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "A cascade means we try a cheaper model first. If it is confident, return the answer. If it is not confident, escalate. Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Request\n  ↓\nSmall model\n\nConfident?\n  ↓\nReturn answer\n\nNot confident?\n  ↓\nSend to larger model ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This can reduce cost because not every request needs the largest model.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What routers do people use in practice?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Many companies build custom routers. Common approaches include:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "rule-based routing\nclassifier-based routing\nsemantic routing\nconfidence-based cascades\nAI gateways ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "There are also products and projects in this space, such as:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "LiteLLM\nPortkey\nSemantic Router style systems\ncustom internal gateways ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "But the important idea is not the specific tool. The important idea is the layer:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "a routing layer sits above model endpoints\nand decides where each request should go ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "How does this connect to CPU inference?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "CPU inference becomes useful when the router has cheaper destinations available. For example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Simple request\n  ↓\nSmall quantized model\n  ↓\nCPU inference service ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "A more complex request may go to:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Large model\n  ↓\nGPU inference service ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So CPU inference is not necessarily replacing GPU inference. It becomes one more option in the routing system.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What does a CPU inference service look like?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "A CPU inference service may still have:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "API endpoint\nrequest queue\nscheduler\nbatching\nKV cache\nreplicas\nload balancer ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So many inference concepts still apply. But the hardware constraints are different.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is different about CPU inference?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "A GPU usually has:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "very high parallel compute\nvery high memory bandwidth\nlimited HBM capacity ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "A CPU server may have:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "less parallel compute\nlarger system RAM\nlower cost\nsimpler deployment ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So CPU inference is often attractive for:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "small models\nquantized models\nlow-throughput workloads\nlocal inference\nedge inference\nprivacy-sensitive tasks ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Does everything we learned apply only to GPU clusters?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "No. Some ideas are universal. For example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "request routing\nload balancing\nbatching\nscheduling\nKV cache\nreplicas\nlatency vs throughput ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "These apply to CPU and GPU inference. But some ideas are much more GPU-specific:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "CUDA\ntensor parallelism\npipeline parallelism across GPUs\nNCCL\nNVLink\nGPU communication\nTensorRT-LLM ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So the higher-level inference system concepts apply broadly. The low-level optimization details depend on the hardware.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Can vLLM run on CPU?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "vLLM is mostly known for high-throughput GPU serving. But vLLM also has CPU backend support. However, the reason vLLM became popular is strongly connected to:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "continuous batching\nPagedAttention\nGPU memory efficiency\nhigh-throughput serving ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So while vLLM can be used with CPUs in some cases, most people associate vLLM with GPU inference systems.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Can TensorRT-LLM run on CPU?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "TensorRT-LLM is different. TensorRT-LLM is NVIDIA’s optimized LLM inference stack for NVIDIA GPUs. So this is much more GPU-specific. If the system is CPU-only, TensorRT-LLM is usually not the right tool.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What do people use for CPU inference then?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "This is where llama.cpp becomes important. llama.cpp is widely used for running LLMs locally and efficiently, especially quantized models. It is common in:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "local inference\nCPU inference\nedge inference\nlaptop inference\nsmall model experimentation ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Tools like Ollama made this local inference experience much easier for many users. A simple mental model:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "vLLM → production GPU serving\n\nTensorRT-LLM → optimized NVIDIA GPU inference\n\nllama.cpp → local / CPU-friendly / quantized inference\n\nOllama → easy local model running experience ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Why is llama.cpp important?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Because it helped make local LLM inference practical. Instead of needing a large GPU cluster, users can run smaller quantized models on:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "laptops\ndesktops\nCPU servers\nedge devices ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This connects directly to the broader CPU inference discussion. If a model can fit in local memory and run fast enough, then not every request has to go to the cloud.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is edge inference?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Edge inference means running inference close to the user or device. Instead of:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "User\n  ↓\nCloud GPU\n  ↓\nResponse ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "we may have:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "User\n  ↓\nLocal device\n  ↓\nCPU / NPU / integrated GPU\n  ↓\nResponse ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This can help with:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "latency\nprivacy\noffline usage\ncost ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "What role do NPUs play?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "An NPU is a neural processing unit. A simple mental model:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "CPU = general purpose compute\n\nGPU = massively parallel compute\n\nNPU = low-power AI acceleration ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Many modern devices now include CPUs, GPUs, and NPUs together. So future inference may not be only cloud GPU inference. It may be a mix of:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "local CPU\nlocal NPU\nlocal GPU\ncloud GPU ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "How would routing work at the edge?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "This is where the architecture becomes very interesting. Imagine a laptop or phone with a local router. A request arrives:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Summarize this email ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The router may decide:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Small local model is enough\n  ↓\nRun locally ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Another request arrives:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Analyze this long legal contract\nand identify business risks ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The router may decide:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Too complex for local model\n  ↓\nSend to cloud GPU model ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So edge inference may use the same routing idea:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "local if possible\ncloud if needed ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Why are people talking about CPUs, ARM, Intel, Dell, and AI PCs?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Because inference is no longer only about giant GPU clusters. There is a growing need to run AI across many types of hardware:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "cloud GPUs\nCPU servers\nAI PCs\nphones\nedge devices\nenterprise servers ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Chip companies, server companies, and device companies all become relevant because inference workloads may spread across the entire compute stack. This does not mean GPUs become unimportant. It means inference becomes more distributed and more workload-specific.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Where does Agentic AI fit in all of this?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "This was another major clarification for me. Agents are usually not LLMs themselves. Agents are orchestration systems. They sit above model calls. A simple stack looks like:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "User\n  ↓\nAgent Runtime\n  ↓\nRouter\n  ↓\nLLM Endpoint\n  ↓\nInference Engine\n  ↓\nHardware ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The agent decides what needs to be done. The router decides which model or service should handle it. The inference engine generates tokens. The hardware runs the computation.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What does an agent actually do?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Suppose the user asks:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Find last month’s invoices\nand summarize unusual expenses. ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "An agent may:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "call accounting system\nretrieve invoice data\ncall search tool\ncall LLM for analysis\ncall database\ngenerate final answer ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The agent is coordinating a workflow. It may call an LLM multiple times. It may call tools. It may store intermediate state. It may decide the next step based on previous results. But the agent itself is usually just software running on CPU.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Does an agent need a GPU?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Usually, no. The agent orchestration layer is often:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Python service\nJava service\nNode service\nworkflow runtime ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This can run on CPUs. The GPU is needed when the system performs actual model inference on a GPU-backed model. So:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Agent orchestration = usually CPU\n\nLLM inference = CPU, GPU, NPU, or cloud endpoint ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "How do agents and routing work together?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "An agent may decide:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "I need to call a model now. ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Then the routing layer decides:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Which model should be called? ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "For example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Agent needs simple classification\n  ↓\nSmall CPU model\n\nAgent needs deep reasoning\n  ↓\nLarge GPU model\n\nAgent needs document extraction\n  ↓\nDocument model service\n\nAgent needs local private answer\n  ↓\nLocal model ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So agents and routers solve different problems. The agent decides the workflow. The router chooses the model endpoint.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What does the full modern AI stack look like?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "A more complete picture now looks like:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "User\n  ↓\nAPI Gateway\n  ↓\nAgent Layer\n  ↓\nModel Router\n  ├── Small CPU Model Service\n  ├── Local Edge Model\n  ├── Large GPU Model Service\n  ├── Research Model Service\n  └── Document Understanding Service\n        ↓\n     Load Balancer\n        ↓\n     Replicas\n        ↓\n     Inference Engine\n        ↓\n     Hardware ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This is much bigger than just:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "User → LLM ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "What is the difference between agent, router, load balancer, and inference engine?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "This is the cleanest separation I now have:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Agent\n= decides what steps need to happen\n\nRouter\n= decides which model/service should handle a model call\n\nLoad Balancer\n= decides which replica inside that service gets the request\n\nInference Engine\n= runs the model efficiently\n\nHardware\n= performs the computation ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Agent decides the workflow.\n\nRouter decides the destination.\n\nLoad balancer decides the replica.\n\nInference engine manages execution.\n\nHardware does the math. ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "How does this connect back to vLLM?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "vLLM sits inside the inference service. For example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Large LLM Service\n  ↓\nLoad Balancer\n  ↓\nvLLM Replica\n  ↓\nGPU Workers ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The outer router may choose the Large LLM Service. The load balancer may choose a specific vLLM replica. Then vLLM manages:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "scheduling\ncontinuous batching\nPagedAttention\nKV cache\nprefill\ndecode\ntoken generation ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So vLLM is not the whole AI platform. It is a critical part of the inference layer.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is the biggest mental shift?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Earlier, I was mostly thinking about:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "one model\nmany requests ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Now the picture is more like:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "many models\nmany hardware types\nmany services\nmany workflows ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This changes the architecture. The system is no longer only asking:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How do we run this model efficiently? ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "It is also asking:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Should this request run locally?\nShould it use a small model?\nShould it use a large model?\nShould it use CPU?\nShould it use GPU?\nShould it call a tool first?\nShould an agent break it into steps? ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "What is the key intuition?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The modern inference stack is becoming layered. At the bottom:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "CPU / GPU / NPU ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Above that:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "CUDA / CPU kernels / hardware runtime ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Above that:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "PyTorch / llama.cpp / TensorRT-LLM / other execution layers ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Above that:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "vLLM / inference engine / serving runtime ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Above that:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "load balancer ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Above that:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "model router ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Above that:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "agent workflow ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So the full system is not just about generating tokens. It is about deciding:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "what to do\nwhich model to use\nwhere to run it\nhow to serve it efficiently\nhow to keep cost and latency under control ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "What does this teach us about CPU inference?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "CPU inference is not a separate universe. It is one part of a larger inference platform. For some requests:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "CPU + small quantized model ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "may be enough. For others:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "GPU + large model ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "is needed. For local tasks:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "edge model ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "may be best. For complex workflows:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "agent + tools + multiple model calls ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "may be required. So the future is not:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "CPU vs GPU ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "It is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "CPU + GPU + NPU + routing + agents ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "working together.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What comes next?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "This article helped me connect several pieces:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "CUDA\nPyTorch\nvLLM\nCPU inference\nGPU inference\nquantization\nllama.cpp\nmodel routing\nload balancers\nedge inference\nAgentic AI ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The next natural step is to go deeper into CPU and local inference. That probably means exploring:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "llama.cpp\nGGUF models\nquantized inference\nOllama\nlocal model serving\nCPU vs GPU performance tradeoffs ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Because now the high-level architecture is clearer. The next question becomes:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How does local CPU inference actually work in practice? ",
+      "type": "code"
+    }
+  ],
+  "images": [],
+  "bodyHash": "ee5c9d846aa4b7e1c92622200bfb5dcc9cee0ff186129d5d335170295dc19a4c"
+}

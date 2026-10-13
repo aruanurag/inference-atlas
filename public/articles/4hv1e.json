@@ -1,0 +1,1276 @@
+{
+  "id": "4hv1e",
+  "title": "Understanding llama.cpp, GGUF, and Local CPU Inference",
+  "author": "Anurag Mohan",
+  "date": "July 7, 2026",
+  "url": "https://www.linkedin.com/pulse/understanding-llamacpp-gguf-local-cpu-inference-anurag-mohan-4hv1e",
+  "blocks": [
+    {
+      "links": [],
+      "text": "LLM Inference Challenges (Part 15)",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "In the previous part, I tried to connect a few confusing pieces together:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "CUDA\nPyTorch\nvLLM\nCPU inference\nGPU inference\nmodel routing\nload balancers\nedge inference\nAgentic AI",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That article helped me build a better layered mental model. At the bottom, there is hardware. Above that, there are compute runtimes. Above that, there are model execution frameworks. Above that, there are inference engines. Above that, there are routers, gateways, and agent systems. But after writing that, one question became more interesting to me:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How does local or CPU-friendly inference actually work?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That leads naturally to:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "llama.cpp\nGGUF\nquantized models\nlocal inference\nCPU inference",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This article is my attempt to understand that layer better.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why talk about llama.cpp now?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "So far, a lot of the inference series focused on large-scale serving concepts:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "KV cache\nbatching\nmulti-GPU inference\ndistributed serving\nrequest routing\nGPU communication\nprefill vs decode\ncontinuous batching\nPagedAttention\nvLLM architecture",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Those concepts are very important for production GPU inference. But inference is not only about massive GPU clusters. There is another important side:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Can we run useful models locally?\nCan we run smaller models on CPUs?\nCan we use quantized models efficiently?\nCan we build simple private endpoints?\nCan we experiment without always needing GPUs?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This is where llama.cpp becomes very interesting.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is llama.cpp?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "At a simple level:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "llama.cpp\n=\na lightweight inference runtime\nfor running LLMs efficiently\nin C/C++",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "It became popular because it made local LLM inference much more practical. Instead of needing a large cloud GPU setup just to experiment, we can run smaller and quantized models on:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "laptops\ndesktops\nCPU servers\nedge devices\nsmall cloud instances",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That does not mean it is only for CPUs. It can also use GPU acceleration depending on the hardware and backend. But the important point is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "llama.cpp made local and resource-conscious inference much more accessible.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "How is llama.cpp different from vLLM?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "This was one of the first things I wanted to clarify for myself. Both can run LLM inference. But they are optimized for different situations. A simple mental model:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "vLLM\n=\nhigh-throughput serving engine\nfor many concurrent requests,\nespecially GPU-backed serving\n\nllama.cpp\n=\nlightweight local / CPU-friendly / quantized inference runtime\nfor running models efficiently on commodity hardware",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That is not a perfect definition, but it is useful. vLLM shines when we care about:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "serving many users\ncontinuous batching\nPagedAttention\nGPU utilization\ndistributed inference\nproduction serving",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "llama.cpp shines when we care about:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "local inference\nsmall models\nquantized models\nsimple deployment\nCPU-friendly experiments\nedge-style workloads",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Are they competing tools?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Not exactly. I think it is better to see them as tools for different parts of the inference landscape. For example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Large model\nmany concurrent users\nGPU cluster\nproduction endpoint",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This sounds like a vLLM-style problem. But:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "small model\nlocal machine\nquantized model\nprivate experiment\nCPU server",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This sounds like a llama.cpp-style problem. So the question is not:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Which one is better?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The better question is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Which runtime matches the workload?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Why is llama.cpp important for learning?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "For me, llama.cpp is useful because it makes inference feel tangible. When learning only through diagrams, concepts can remain abstract. But when I can actually:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "download a model\nrun a local server\nsend a prompt\nmeasure latency\ncompare quantization formats\nchange CPU threads\nobserve tokens/sec",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "the concepts become more real. This is especially useful after writing so many conceptual articles. At some point, I want to move from:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "understanding inference systems",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "to:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "running inference systems",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "llama.cpp is a very good bridge for that.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What problem does llama.cpp solve?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The basic problem is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How can we run LLMs efficiently\nwithout always needing a huge GPU setup?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Large models are expensive to serve. They need memory. They need compute. They need optimized runtimes. But not every task needs the largest model. For many practical tasks, a smaller model may be good enough. Examples:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "basic summarization\nclassification\nsimple chat\nrouting decisions\nlocal assistant tasks\nstructured extraction\ndraft generation",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "If a small quantized model can solve the task, then running it locally or on CPU can be very attractive.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What makes CPU inference difficult?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "CPUs are general-purpose processors. They are flexible, but they do not have the same massive parallel compute profile as GPUs. A GPU is built for large parallel tensor operations. A CPU is built for broader general-purpose workloads. So for LLM inference, CPUs usually face challenges like:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "lower parallel compute\nlower memory bandwidth compared to GPU HBM\nslower token generation for larger models\nlimited throughput for high concurrency",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So CPU inference is not magic. It is a tradeoff.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Then why use CPUs at all?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Because CPUs are everywhere. They are available in:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "laptops\ndesktops\ncloud VMs\nenterprise servers\nedge devices\ndeveloper machines",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "They are also simpler to access than GPUs in many cases. For learning and experimentation, that matters a lot. If I can run a small model quickly on CPU, I can test ideas without waiting for GPU capacity. For some workloads, CPU inference may also be cheaper or easier to operate. So the value is not:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "CPU beats GPU",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The value is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "CPU is useful for the right workload.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "What changed to make CPU inference more practical?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "A few things came together. First, smaller models became much better. Today, models in the range of:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "1B\n3B\n7B\n8B",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "can be useful for many tasks. Second, quantization became more practical. Third, tools like llama.cpp made it easier to run quantized models efficiently. So the question shifted from:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Can I run the biggest model?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "to:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is the smallest model\nthat can solve this task well enough?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That question is very important for real inference systems.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is GGUF?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "GGUF is a model file format commonly used with llama.cpp. A simple mental model:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "GGUF\n=\na packaged model file format\nthat llama.cpp can load and run",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "When downloading models for llama.cpp, we often see files like:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "model.Q4_K_M.gguf\nmodel.Q8_0.gguf\nmodel.F16.gguf",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "These filenames usually tell us something about the quantization format. For example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "F16\nQ8_0\nQ4_K_M",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "represent different ways the model weights are stored.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why does the model file format matter?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Because running an LLM is not only about the model architecture. The runtime needs to load:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "weights\nmetadata\ntokenizer information\nquantization details\narchitecture details",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The file format helps package these things in a way the runtime understands. So when I use llama.cpp, I am usually not downloading a raw PyTorch checkpoint directly. I am downloading a GGUF version that has already been converted and often quantized for this runtime.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is quantization again?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "A model is mostly weights. Weights are numbers. For example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "0.18342\n-1.28493\n2.91834",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "If we store these numbers in high precision, the model needs more memory. For example, FP16 uses:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "16 bits per weight",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So a rough estimate for a 7B model is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "7 billion weights × 2 bytes\n≈ 14 GB",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That is just for weights. It does not include KV cache, activations, runtime overhead, or other memory usage. Quantization stores weights with fewer bits. For example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "FP16 → 16 bits\nINT8 → 8 bits\nINT4 → 4 bits",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The rough memory idea becomes:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "FP16 model → larger\nQ8 model → smaller\nQ4 model → much smaller",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Why does quantization help local inference?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Because local machines and CPU servers may not have enough memory or bandwidth for large full-precision models. Quantization helps by:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "reducing model size\nreducing memory usage\nimproving cache efficiency\nmaking models easier to load\nmaking inference possible on smaller machines",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "For example, a model that is too large in FP16 may become practical in Q4. This is one of the main reasons local inference became more accessible.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Does quantization make the model worse?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Sometimes. Quantization is a tradeoff. We are storing approximate versions of the original weights. That can reduce quality. But the quality drop may be acceptable depending on:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "model size\nquantization level\ntask difficulty\nprompt style\nexpected answer quality",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "For many tasks, a quantized model can still be useful. For harder reasoning, coding, long-context analysis, or high-accuracy tasks, the difference may become more visible. So again, the question is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Is this model good enough for this task?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Not:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Is this model universally best?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "How should I think about Q4, Q5, Q8, and F16?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "A simple mental model:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "F16\n=\nlarger memory usage,\nbetter precision\n\nQ8\n=\nsmaller than F16,\noften still strong quality\n\nQ4 / Q5\n=\nmuch smaller,\nmore practical for local inference,\npossible quality tradeoff",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This is not a universal rule for every model and every task. But it helps as a starting point. If I want maximum quality and have enough memory, I may try higher precision. If I want local speed and lower memory usage, I may try Q4 or Q5. If I want a middle ground, Q8 may be useful.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why do GGUF filenames look confusing?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Because the filename often includes both the model name and quantization type. Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Qwen2.5-7B-Instruct-Q4_K_M.gguf",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This tells us:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Model family: Qwen2.5\nModel size: 7B\nInstruction-tuned: Instruct\nQuantization: Q4_K_M\nFormat: GGUF",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "At first, these names look noisy. But once the pattern becomes clear, they are useful. They tell us what we are about to run.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What happens when llama.cpp runs a model?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "At a high level:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Load GGUF model\nInitialize runtime\nTokenize prompt\nRun prefill\nCreate KV cache\nRun decode loop\nGenerate tokens\nStream or return output",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This should look familiar now. Even though we are using llama.cpp instead of vLLM, many inference concepts still apply:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "tokens\nprefill\ndecode\nKV cache\nbatching\nlatency\ntokens/sec\nmemory usage",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That is important. The runtime is different, but the core inference behavior is still related.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Does llama.cpp also use KV cache?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Yes. Autoregressive generation still needs previous context. During prefill, the model processes the prompt and builds KV cache. During decode, new tokens are generated one at a time, and the KV cache grows. So even in local inference, the same mental model applies:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Prompt tokens fill the KV cache.\nGenerated tokens extend the KV cache.\nLonger context uses more memory.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This is why context length matters even for CPU inference.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why does context length matter?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Because the longer the context, the more KV cache memory is needed. A short prompt may be easy. A long document may be much harder. For example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "500 tokens",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "is very different from:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "32,000 tokens",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Even if the model weights fit, the KV cache can become a major memory consumer. This connects directly to the earlier inference articles. Model size is not the only memory problem. Runtime state matters too.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is prefill like in llama.cpp?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Prefill is when the prompt is processed. If the prompt is long, prefill takes longer. That affects:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "time to first token",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So when I benchmark local inference, I should not only look at final generation speed. I should also measure:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How long until the first token appears?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "A model may generate tokens quickly after it starts, but still have slow prefill for long prompts.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is decode like in llama.cpp?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Decode is the token-by-token generation loop. This affects:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "tokens per second\ninter-token latency\nstreaming speed",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "If the decode speed is low, the response feels slow even after the first token appears. So for local inference, I want to measure both:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "TTFT\nand\ntokens/sec",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "because they show different parts of the user experience.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why does tokens/sec matter?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Tokens/sec tells us how quickly the model generates output. For example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "5 tokens/sec",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "feels very different from:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "40 tokens/sec",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "For interactive chat, tokens/sec matters a lot. For batch processing, throughput may matter more than streaming feel. So again, the right metric depends on the workload.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why does TTFT matter?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "TTFT means:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Time To First Token",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This is how long the user waits before seeing the first generated token. TTFT is affected by:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "queueing\nprompt length\nprefill speed\nruntime overhead\nhardware speed\nmodel size",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "For a chat application, TTFT strongly affects perceived responsiveness. Even if total generation is fast, a long pause before the first token can feel bad.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What should I benchmark first?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "For my own learning, I would start simple:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "same model\nsame prompt\ndifferent quantization",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Qwen2.5 7B Q4_K_M\nvs\nQwen2.5 7B Q8_0",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Then compare:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "memory usage\nTTFT\ntokens/sec\nlatency\nanswer quality",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "After that, change one more variable:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "same model\nsame quantization\ndifferent CPU shape",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Then compare again. The important rule is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Change one variable at a time.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Otherwise, the benchmark becomes hard to understand.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What variables matter in CPU inference?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "A few important ones are:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "model size\nquantization format\nnumber of CPU cores\nCPU generation\nmemory bandwidth\nthread count\ncontext length\nprompt length\noutput length\nbatch size\nruntime build options",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This is why CPU inference experiments can be surprisingly interesting. There are many small knobs that affect performance.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why does thread count matter?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "llama.cpp can use CPU threads to parallelize work. But more threads are not always automatically better. At some point:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "thread overhead\nmemory bandwidth limits\nCPU topology",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "can affect scaling. So it is useful to benchmark different thread counts instead of assuming the highest number is always best. This is a very practical learning point.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why does native build matter?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "A portable build is safer because it can run across more machines. A native build can compile for the specific CPU features available on the machine. That may improve performance. But it may also introduce compatibility issues if certain instructions are not supported. This is exactly the kind of thing I want to learn from hands-on experiments. Conceptually, we can say:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "portable build\n=\nmore compatible\n\nnative build\n=\npotentially faster,\nbut more hardware-specific",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "How does this connect to my OCI inference workbench?",
+      "type": "heading"
+    },
+    {
+      "links": [
+        {
+          "text": "https://github.com/aruanurag/llm-inference-lab/tree/main/apps/oci-inference-cloud",
+          "url": "https://github.com/aruanurag/llm-inference-lab/tree/main/apps/oci-inference-cloud"
+        }
+      ],
+      "text": "Wokbench: https://github.com/aruanurag/llm-inference-lab/tree/main/apps/oci-inference-cloud",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This is where the topic becomes hands-on for me. I recently started building a small inference cloud workbench for my own learning. The idea is simple:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "provision infrastructure\ndeploy llama.cpp\ndownload a GGUF model\nstart an endpoint\nrun benchmarks\ncompare results\nclean up infrastructure",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This gives me a repeatable loop. Instead of manually setting up everything every time, I can create experiments and compare them. That matters because inference learning needs repetition. One benchmark is not enough. I want to compare:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "different models\ndifferent quantization formats\ndifferent shapes\ndifferent CPU counts\ndifferent prompts\ndifferent workloads",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Why start with CPU on OCI?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Because it is simpler and still useful. Before jumping into GPUs, I want to understand:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How far can CPU inference go?\nWhat does performance look like?\nWhich small models are usable?\nHow does quantization affect latency?\nHow does model size affect memory?\nWhat does routing to a CPU model feel like?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Starting with CPU also keeps the feedback loop smaller. It lets me focus on fundamentals:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "model loading\nendpoint serving\nbenchmarking\nTTFT\ntokens/sec\nlatency\ncleanup",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "These concepts will still matter later when I move to GPU inference.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Does CPU inference replace GPU inference?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "No. This is important. CPU inference is not replacing GPU inference. For large models, high concurrency, long context, and low-latency production serving, GPUs are still extremely important. The better mental model is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "CPU inference\n=\nuseful for smaller models,\nlocal workloads,\nexperiments,\nedge use cases,\nand cost-sensitive tasks\n\nGPU inference\n=\nimportant for larger models,\nhigher throughput,\nlower latency,\nand production-scale serving ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So the future is not:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "CPU vs GPU",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "It is more like:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "CPU + GPU + NPU + routing",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "where the system chooses the right destination for each workload.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How does this connect to model routing?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Once we have a CPU inference endpoint, we can start routing requests. For example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Simple request\n  ↓\nsmall quantized model on CPU\n\nComplex request\n  ↓\nlarger model on GPU or hosted endpoint ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This is a very practical architecture. Not every request needs the most expensive model. If a smaller CPU model can answer well enough, that may reduce cost and improve privacy. If the request is too hard, the router can escalate to a stronger model. So CPU inference becomes one destination in a broader model routing system.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What does the architecture look like?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "A simple local experiment may look like:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "User\n  ↓\nLocal app\n  ↓\nRouter\n  ├── CPU model endpoint\n  └── Hosted LLM endpoint ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The CPU model endpoint may be backed by:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "llama.cpp\n+\nGGUF model\n+\nquantized weights",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This is a small version of a bigger production idea:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "route each request to the cheapest model\nthat can still solve it well enough",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Where does Ollama fit?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Ollama is often used as an easy local model running experience. It makes it simple to download and run models locally. A useful mental model:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "llama.cpp\n=\nlow-level local inference runtime\n\nOllama\n=\ndeveloper-friendly local model experience",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This is not a deep technical comparison. But for learning, it helps. If I want more direct control over flags, builds, models, and benchmarks, llama.cpp is very useful. If I want a smoother local user experience, Ollama is very convenient.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Where does GGUF fit in that ecosystem?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "GGUF is the model format that makes these local inference workflows easier. A model in GGUF format can be distributed with quantization already applied. Then tools like llama.cpp can load it and run inference. So the flow often looks like:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Choose model\nChoose GGUF quantization\nDownload file\nRun with llama.cpp\nBenchmark\nCompare output",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This is why GGUF appears so frequently in local inference discussions.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is the biggest mental shift for me?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Earlier, I mostly thought about inference in terms of:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "large GPU serving systems",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Now I am starting to see a broader picture:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "large GPU serving\n+\nlocal CPU inference\n+\nquantized models\n+\nrouting\n+\nedge use cases ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This makes inference feel more like a platform problem. The platform may include:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "small local models\nCPU endpoints\nGPU endpoints\nhosted APIs\nrouters\nbenchmarking\nobservability\ncost controls",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The model is only one part. The system around the model decides how useful and efficient it becomes.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What should we not overclaim?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "It is easy to get excited about local inference and say:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Everything will run locally.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "I do not think that is the right view. Local inference is powerful, but it has limits. Small models are improving, but large models still matter. CPU inference is useful, but GPUs still matter. Quantization helps, but it can affect quality. So the practical view is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Use local inference where it fits.\nUse larger GPU models where they are needed.\nUse routing to decide between them.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "What is the key mental model?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "I would summarize this article like this:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "llama.cpp\nhelps run LLMs efficiently\non local and CPU-friendly environments.\n\nGGUF\npackages models in a format\nthat works well with llama.cpp.\n\nQuantization\nreduces model size\nso models can run on smaller hardware.\n\nCPU inference\ndoes not replace GPU inference,\nbut it expands where inference can run.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "How does this connect back to the full inference stack?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The stack now looks something like:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Application\n  ↓\nRouter\n  ↓\nInference endpoint\n  ↓\nRuntime\n  ↓\nHardware",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "For a llama.cpp CPU endpoint:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Application\n  ↓\nRouter\n  ↓\nllama.cpp server\n  ↓\nGGUF model\n  ↓\nCPU",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "For a vLLM GPU endpoint:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Application\n  ↓\nRouter\n  ↓\nvLLM replica\n  ↓\nGPU workers\n  ↓\nGPU",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The outer architecture can be similar. But the runtime and hardware are different.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why does this matter for LLMOps?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Because LLMOps is not only about deploying the biggest model. It is about:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "choosing the right model\nchoosing the right hardware\nmeasuring performance\ncontrolling cost\nmonitoring latency\nmaintaining reliability\nimproving user experience",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "CPU inference gives one more option in that toolbox. And once model routing becomes part of the system, this becomes even more important.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What comes next?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Now that llama.cpp, GGUF, quantization, and CPU inference are clearer, the next natural step is hands-on. The next article should probably be:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Running CPU Inference Experiments on OCI",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That would connect this concept article with actual experiments:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "provisioning an instance\ndeploying llama.cpp\nchoosing a GGUF model\nstarting an endpoint\nrunning benchmarks\nmeasuring TTFT\nmeasuring tokens/sec\ncomparing quantization formats\ncleaning up infrastructure",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That is the direction I am personally excited about now. The conceptual foundation has been useful. But the next phase should be much more practical. I want to see:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "real latency numbers\nreal throughput numbers\nreal model behavior\nreal tradeoffs ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Because at the end of the day, inference systems are learned best by running them.",
+      "type": "paragraph"
+    }
+  ],
+  "images": [],
+  "bodyHash": "3176c17f92eba0ac46327665bafaf3546f7dded9cd44c76aa9473ccee3960e9a"
+}

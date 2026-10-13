@@ -1,0 +1,976 @@
+{
+  "id": "ckarc",
+  "title": "Understanding Prefill/Decode Disaggregation and KV-Cache Transfer",
+  "author": "Anurag Mohan",
+  "date": "July 30, 2026",
+  "url": "https://www.linkedin.com/pulse/understanding-prefilldecode-disaggregation-kv-cache-transfer-mohan-ckarc",
+  "blocks": [
+    {
+      "links": [],
+      "text": "LLM Inference Challenges (Part 19)",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "In the previous part, we explored KV-cache-aware routing.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The main idea was:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Do not route only based on load.\n\nAlso consider where useful\nKV-cache state already exists.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That works naturally when one model server handles both phases of inference:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Prefill\n+\nDecode",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The request reaches one server, the prompt is processed, the KV cache is created, and token generation continues on the same server.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But modern distributed inference systems may separate these two phases.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Now the request may begin on one worker and finish on another.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That creates a new problem:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How do we move the KV cache\nfrom the prefill worker\nto the decode worker\nwithout losing the performance\nwe were trying to gain?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This is where prefill/decode disaggregation and KV-cache transfer become important.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why separate prefill and decode?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "We previously learned that prefill and decode behave very differently.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Prefill processes the prompt:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "many input tokens\nlarge matrix operations\nhigh parallelism\ncompute-heavy work",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Decode generates the response:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "one token per sequence per step\nrepeated access to model weights\nrepeated access to KV cache\nlatency-sensitive work",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "A useful simplification is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Prefill\n=\ncompute-heavy\n\nDecode\n=\nmemory-bandwidth and latency-sensitive",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "When both phases run on the same workers, they compete for the same resources.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A long prompt may begin prefill while several other requests are actively decoding.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The flow can look like:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Active users are decoding\n  ↓\nA long prompt arrives\n  ↓\nLarge prefill workload enters\n  ↓\nDecode steps receive less predictable access\nto compute and memory bandwidth\n  ↓\nInter-token latency increases",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "In other words, a new user waiting for the first token can disturb users who are already receiving tokens.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "vLLM describes one motivation for disaggregated prefilling as the ability to tune time to first token and inter-token latency separately, while also controlling decode tail latency caused by prefill work entering the same engine.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is prefill/decode disaggregation?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "In a normal deployment:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Model Server\n├── Prefill\n└── Decode",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "In a disaggregated deployment:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Prefill Workers\n+\nDecode Workers",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The prefill workers process prompts and create KV cache.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The decode workers receive that KV cache and generate output tokens.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The request flow becomes:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "User Request\n  ↓\nRouter\n  ↓\nPrefill Worker\n  ↓\nPrompt Processing\n  ↓\nKV Cache Created\n  ↓\nKV Cache Transferred\n  ↓\nDecode Worker\n  ↓\nToken Generation\n  ↓\nResponse Streamed",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "llm-d describes this as splitting one inference request across specialized workers, with the Router selecting both a prefill endpoint and a decode endpoint and coordinating the KV-cache transfer between them.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How is this different from the parallelism we already learned?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "It helps to keep the layers separate:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Tensor Parallelism\n=\nsplit tensors across GPUs\n\nPipeline Parallelism\n=\nsplit model layers across stages\n\nData Parallelism\n=\ncreate multiple model replicas\n\nPrefill/Decode Disaggregation\n=\nsplit runtime phases across workers",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "These techniques can still be used together.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Prefill Worker Group\n→ 4 GPUs using tensor parallelism\n\nDecode Worker Group\n→ 8 GPUs using tensor parallelism",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Disaggregation does not replace multi-GPU parallelism.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It changes where different phases of the request execute.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why is independent scaling useful?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Different applications create different workload shapes.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Consider a document-analysis application:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Very long prompts\nShort answers",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This workload may need:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "more prefill capacity\nless decode capacity",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Now consider a creative-writing application:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Short prompts\nVery long answers",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This may need:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "less prefill capacity\nmore decode capacity",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "With combined workers, every replica contains both capabilities, even when the workload needs more of one than the other.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "With disaggregation, the system can use ratios such as:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "4 Prefill Workers\n+\n8 Decode Workers",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "or:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "8 Prefill Workers\n+\n4 Decode Workers",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This allows the infrastructure to match the actual workload rather than treating every request phase identically.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What must move between the workers?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The decode worker cannot continue with only the original prompt text.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It needs the KV cache produced during prefill.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The KV cache contains the key and value tensors created for the prompt across the model’s transformer layers.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Without that state, the decode worker would need to process the entire prompt again.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That would defeat the purpose.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So after prefill:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Prefill Worker\nhas:\n- prompt KV-cache blocks\n- information describing those blocks\n- the position where generation should continue",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The decode worker needs enough information to place those blocks correctly in its own KV-cache memory.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Is only the KV-cache data transferred?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "There are really two related transfers:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Control information\n+\nKV-cache data",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The control information may describe:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "which prefill worker produced the cache\nwhich decode worker should receive it\nwhich memory regions or blocks are involved\nhow the receiver can locate the transferred state\nwhen the transfer has completed",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The actual data plane moves the large KV tensors.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A useful mental model is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Control plane:\nWhere should the cache go,\nand how should the workers coordinate?\n\nData plane:\nMove the actual KV-cache bytes.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Current llm-d and vLLM integrations exchange transfer metadata between the prefill and decode sides, while the inference runtime’s KV connector performs the cache movement.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why can the transfer be expensive?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "KV-cache size grows with:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "prompt length\nnumber of model layers\nnumber of KV heads\nhead dimension\nKV-cache precision",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So a short prompt may create a relatively small transfer.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A long-context request may create a much larger one.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The new critical path becomes:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Queue for Prefill\n+\nPrefill Computation\n+\nKV-Cache Transfer\n+\nQueue for Decode\n+\nFirst Decode Step",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This means time to first token is no longer controlled only by prefill compute.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It also depends on how quickly the cache reaches the decode worker.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The longer the prompt and the larger the model, the more important the network becomes.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why not just send the cache through a normal network request?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "KV caches can be large, and copying them through multiple intermediate locations would create overhead.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "An inefficient path might look like:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Prefill GPU\n  ↓\nPrefill CPU Memory\n  ↓\nApplication Process\n  ↓\nNetwork\n  ↓\nDecode Application Process\n  ↓\nDecode CPU Memory\n  ↓\nDecode GPU",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Every extra copy increases:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "latency\nCPU overhead\nmemory bandwidth usage",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "High-performance systems try to make the path more direct:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Prefill GPU Memory\n  ↓\nHigh-Speed Interconnect\n  ↓\nDecode GPU Memory",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "NVIDIA NIXL is one transport layer used in current distributed serving systems to move KV cache directly between workers. It can use technologies such as NVLink, PCIe, or RDMA-capable networking depending on the topology.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why does RDMA matter?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "When prefill and decode run on different nodes, the cache must cross the network.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Traditional networking often involves more CPU participation and memory copying.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "RDMA allows data to move between registered memory regions with much less CPU involvement.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The important intuition is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Normal networking:\nmore software and CPU involvement\n\nRDMA:\nmore direct memory-to-memory transfer",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "llm-d’s deployment guidance recommends high-performance RDMA interconnects for production disaggregated serving. Without RDMA, its NIXL path can fall back to TCP, but that path is positioned mainly for testing rather than efficient production transfer.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Can KV transfer overlap with other work?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Ideally, yes.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The system does not want the entire GPU to remain idle while one request’s KV cache is moving.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A transfer layer may perform asynchronous or non-blocking movement so workers can continue handling other requests.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Conceptually:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Request A KV cache is transferring\n\nMeanwhile:\n\nPrefill Worker\n→ processes Request B\n\nDecode Worker\n→ generates tokens for Request C",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This does not make the transfer free.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But it can hide some of the transfer time behind useful computation.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The final request still cannot start its own decode phase until the required KV state is available.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Who selects the prefill and decode workers?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "A disaggregated router now makes two placement decisions:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Which prefill worker should process the prompt?\n\nWhich decode worker should continue generation? ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "For the prefill worker, it may consider:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "prefill queue depth\ncompute capacity\nexisting prefix cache\nprompt length",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "For the decode worker, it may consider:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "active decode sequences\nKV-cache capacity\nexpected output length\ninter-token latency\nnetwork distance from the prefill worker",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The choices are connected.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A decode worker may look lightly loaded, but if it is far from the selected prefill worker, the cache transfer may be expensive.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So routing may become topology-aware:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Do not only choose good workers.\n\nChoose a good worker pair.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Why does topology matter?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Suppose there are two possible decode workers:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Decode A:\nsame rack as Prefill Worker\nmoderate queue\n\nDecode B:\ndifferent zone\nempty queue",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Decode B has less work.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But transferring a large KV cache to it may take longer.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The Router must balance:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "queue delay\nvs\ntransfer delay",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "A useful conceptual formula is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Expected TTFT\n≈\nPrefill Queue\n+\nPrefill Compute\n+\nKV Transfer\n+\nDecode Queue\n+\nFirst Decode Step",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The best endpoint is not always the emptiest one.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It may be the endpoint that gives the lowest total path.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why must the prefill and decode workers be compatible?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The decode worker must understand the KV-cache layout produced by the prefill worker.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Compatibility can depend on:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "model version\nKV-cache precision\nblock size\nattention implementation\ntensor-parallel configuration\nruntime version",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "If the two workers organize KV memory differently, directly transferring the blocks may not work correctly.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Current llm-d operational guidance specifically warns that prefill and decode pairs must use compatible KV-cache layouts, including during rolling upgrades or configuration changes.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This makes deployments more operationally sensitive.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A normal stateless service can sometimes roll out one replica at a time with few concerns.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Disaggregated inference workers are cooperating on the same request state.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Their compatibility matters.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Does disaggregation always make inference faster?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "No.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This is probably the most important limitation.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Disaggregation adds:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "routing complexity\nanother queue\ntransfer coordination\nnetwork dependency\nKV-cache movement\nmore operational components",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "For short prompts, the cache transfer may cost more than the prefill interference it prevents.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For a small deployment with low traffic, combined workers may be simpler and faster.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Disaggregation becomes more attractive when:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "prompts are long\ntraffic is high\nprefill disrupts decode latency\nthe workload has an uneven prefill/decode ratio\nhigh-speed networking is available",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The correct question is not:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Is disaggregation better?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "It is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Does separating the phases save\nmore time than the transfer adds\nfor this workload?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "What should we measure?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "A useful experiment should compare a combined deployment with a disaggregated one.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Track:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "time to first token\ninter-token latency\np95 and p99 latency\nprefill queue time\ndecode queue time\nKV-cache transfer time\ninput tokens per second\noutput tokens per second\nGPU utilization\nnetwork throughput",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The most important comparison is not only average throughput.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "We should also ask:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Did long prefill requests stop disturbing\nusers who were already decoding?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That is one of the main reasons to consider the architecture.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is the key mental model?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "I would summarize it like this:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Prefill/Decode Disaggregation\nseparates two very different workloads.\n\nKV-Cache Transfer\nreconnects the request state\nbetween those workloads.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Or:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Disaggregation gives us\nindependent scaling and isolation.\n\nKV transfer introduces\na new network-dependent critical path.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The system wins only when:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "benefit from specialization\n>\ncost of transferring state",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "What is the biggest mental shift?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Until now, networking mostly helped multiple GPUs collaborate.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Here, networking becomes part of one user request’s latency.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The first token may depend on:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "a prompt processed on one GPU\na large cache transferred across the network\nand generation beginning on another GPU",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So the infrastructure is not only transporting requests.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It is transporting the model’s intermediate state.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That makes KV-cache movement one of the most important data-plane problems in distributed inference.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What comes next?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Now that the overall disaggregated flow is clearer, one component deserves a closer look:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "NIXL",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "What exactly does a KV-transfer layer do?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How does it move data across GPU memory, CPU memory, networks, and storage?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How does it work with systems such as vLLM, llm-d, and NVIDIA Dynamo?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That could lead to:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "LLM Inference Challenges (Part 21)",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Understanding NIXL and the KV-Cache Data Plane",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Because once inference state starts moving between workers, routing tells us where it should go.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The data plane determines:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "how quickly it gets there.",
+      "type": "code"
+    }
+  ],
+  "images": [],
+  "bodyHash": "02173b62ef2333e8a303185a31dd0be8def00088259f512c27573987d9805448"
+}

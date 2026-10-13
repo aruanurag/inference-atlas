@@ -1,0 +1,2026 @@
+{
+  "id": "kcpre",
+  "title": "Understanding Memory Requirements for LLM Inference",
+  "author": "Anurag Mohan",
+  "date": "July 13, 2026",
+  "url": "https://www.linkedin.com/pulse/understanding-memory-requirements-llm-inference-anurag-mohan-kcpre",
+  "blocks": [
+    {
+      "links": [],
+      "text": "LLM Inference Challenges (Part 16)",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "In the previous part, I explored:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "llama.cpp\nGGUF\nquantized models\nlocal CPU inference",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That article helped me understand how smaller models can run on CPUs, local machines, and cloud CPU instances.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But once I started thinking more practically, another question became very important:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How much memory do we actually need\nto run LLM inference?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "At first, I used to think about this mainly as:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Can the model fit?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "But that is only one part of the story.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For inference, memory is not only used by the model weights.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Memory is also used by:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "KV cache\ntemporary compute buffers\nactivations\nruntime overhead\nframework overhead\nOS memory\nsafety margin",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So the real question is not just:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Can I load the model?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The better question is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Can I load the model\nand still have enough memory\nfor the actual inference workload?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That is what this article is about.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why does memory planning matter?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "When running LLM inference, memory decides many practical things.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It decides:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "which model can load\nhow long the context can be\nhow many users can run at once\nhow many tokens can be generated\nhow large the batch can be\nwhether the system crashes or stays stable",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This is why memory planning is one of the most important parts of inference.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A model may run fine for one request.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But when we increase:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "context length\nconcurrent users\nbatch size\noutput tokens ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "the same model may suddenly fail.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That is because the memory requirement is not fixed.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It grows with the workload.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What memory are we talking about?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The word memory can mean different things depending on where inference is running.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For CPU inference:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "memory = system RAM",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "For GPU inference:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "memory = GPU VRAM / HBM",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "For Apple Silicon or unified memory systems, CPU and GPU may share memory.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But the high-level idea is the same.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The model and runtime need enough memory to hold everything required for inference.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What are the main memory components?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "A simple formula is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Total inference memory\n=\nmodel weights\n+\nKV cache\n+\ntemporary compute memory\n+\nruntime overhead\n+\nsafety margin ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The two biggest pieces are usually:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "model weights\n+\nKV cache",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Weights decide whether the model can load.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "KV cache decides how much context and concurrency the system can handle.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That distinction is very important.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What are model weights?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Model weights are the learned parameters of the model.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "When we say:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "7B model",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "we mean the model has roughly:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "7 billion parameters",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Each parameter is a number.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "0.18\n-1.29\n2.91",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "These numbers are stored in memory.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So the first memory calculation is simple:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "model weight memory\n=\nnumber of parameters\n×\nbytes per parameter",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "How many bytes does each parameter need?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "That depends on precision.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A rough guide:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "FP32  = 4 bytes per parameter\nFP16  = 2 bytes per parameter\nBF16  = 2 bytes per parameter\nINT8  ≈ 1 byte per parameter\nINT4  ≈ 0.5 byte per parameter",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So for a 7B model in FP16:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "7 billion × 2 bytes\n≈ 14 GB",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That means the weights alone need roughly 14 GB.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But that does not mean a 16 GB machine is enough.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Because we still need memory for KV cache and runtime overhead.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What happens with quantized models?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Quantization stores model weights using fewer bits.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "FP16 → 16 bits\nINT8 → 8 bits\nINT4 → 4 bits",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So the rough memory estimate becomes:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "7B FP16\n≈ 14 GB\n\n7B INT8\n≈ 7 GB\n\n7B INT4\n≈ 3.5 GB",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "In practice, there is some extra metadata and format overhead.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So the exact number may not be perfectly equal to the simple formula.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For GGUF models, the easiest practical estimate is often:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "model weight memory\n≈\nGGUF file size",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That is not perfect, but it is a very useful starting point.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why is this useful for CPU inference?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "When using llama.cpp, I usually download a GGUF model.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Qwen2.5-7B-Instruct-Q4_K_M.gguf",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The file size gives a practical sense of how much memory the model weights need.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "If the GGUF file is around 4.5 GB, then the system needs at least that much memory just for loading the model.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But again, that is only the starting point.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The full memory requirement is larger.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is KV cache?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "KV cache stores key and value tensors from previous tokens.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "During generation, the model needs to attend to previous tokens.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Without KV cache, it would need to recompute a lot of previous attention information again and again.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "KV cache avoids that.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The simple mental model is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Prompt tokens create KV cache.\n\nGenerated tokens extend KV cache.\n\nLonger sequence means larger KV cache.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So KV cache grows with the number of tokens being processed.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why does KV cache matter so much?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Because KV cache grows with:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "context length\nnumber of active requests\nnumber of layers\nnumber of KV heads\nhead dimension\nKV cache precision",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This means memory usage increases when we increase:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "longer prompts\nlonger generated outputs\nmore concurrent users\nlarger batch sizes\nlarger context windows",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This is why KV cache is central to inference memory planning.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is the KV cache formula?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "A useful formula is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "KV cache memory\n=\nactive sequences\n×\ntokens per sequence\n×\nnumber of layers\n×\n2\n×\nnumber of KV heads\n×\nhead dimension\n×\nbytes per KV element",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The 2 is because we store:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "K cache\n+\nV cache",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "A more accurate version is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "KV cache memory\n=\ntotal active tokens\n×\nnumber of layers\n×\n2\n×\nnumber of KV heads\n×\nhead dimension\n×\nbytes per KV element",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This is the formula I want to remember.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What are active tokens?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Active tokens means all tokens currently stored in KV cache across active requests.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For one request:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "active tokens\n=\nprompt tokens\n+\ngenerated tokens so far",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "For multiple requests:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "total active tokens\n=\nrequest A tokens\n+\nrequest B tokens\n+\nrequest C tokens\n+\n... ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So if we have:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Request A → 1000 tokens\nRequest B → 2000 tokens\nRequest C → 500 tokens",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "then:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "total active tokens\n=\n3500 tokens",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That total drives KV cache memory.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is a simple KV cache example?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Suppose a model has:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "number of layers = 32\nnumber of KV heads = 8\nhead dimension = 128\nKV cache dtype = FP16",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "FP16 means:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "2 bytes per element ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Now KV cache per token is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "32 × 2 × 8 × 128 × 2 bytes",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That equals:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "131,072 bytes",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "or roughly:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "128 KB per token",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That means every token for every active request needs around 128 KB of KV cache memory.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What does that mean for one request?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "If one request uses a 4096-token context:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "128 KB × 4096\n≈ 512 MB",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So one request may need around:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "512 MB of KV cache",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That is only KV cache.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It does not include model weights.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What about multiple active requests?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "If we have 16 active requests, each using 4096 tokens:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "512 MB × 16\n≈ 8 GB",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Now KV cache alone is around:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "8 GB",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This is where inference memory becomes interesting.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A model may fit.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But the workload may not.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What does total memory look like?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Suppose:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "model weights = 14 GB\nKV cache = 8 GB\nruntime overhead = 3 GB",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Then total memory becomes:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "14 GB\n+\n8 GB\n+\n3 GB\n=\n25 GB",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So even though the model weights are only 14 GB, a 16 GB system would not be enough for this serving workload.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This is the key lesson.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is the most important intuition?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The simplest intuition is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Model weights decide if the model can load.\n\nKV cache decides how much inference workload can run.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Or:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Weights are mostly fixed.\n\nKV cache grows with users and tokens.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This is why memory planning for inference is not only about model size.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It is also about workload shape.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is workload shape?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Workload shape means the kind of requests the system is serving.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "short prompts\nshort outputs\nfew users",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "is very different from:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "long prompts\nlong outputs\nmany users",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Even if both use the same model, the memory requirements can be very different.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A chatbot with short messages may be manageable.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A document analysis system with long context may need much more memory.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why does context length matter?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Context length directly affects KV cache.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "If we increase context from:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "4096 tokens",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "to:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "8192 tokens",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "then KV cache roughly doubles.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "If we increase it again to:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "32768 tokens",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "then KV cache becomes much larger.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That means long-context inference can become memory-heavy very quickly.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This is why setting a large context window is not free.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why does concurrency matter?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Concurrency means how many requests are active at the same time.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "If one request needs 512 MB of KV cache, then:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "1 request  → 512 MB\n4 requests → 2 GB\n8 requests → 4 GB\n16 requests → 8 GB",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So concurrency multiplies KV cache memory.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This is why serving many users requires much more memory than running one local prompt.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How does this connect to batching?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Batching improves throughput by processing multiple requests together.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But batching also means more active sequences.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "More active sequences means more KV cache memory.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So batching creates a tradeoff:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "larger batch\n=\nbetter GPU/CPU utilization\n+\nmore KV cache memory",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This connects directly to continuous batching.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Continuous batching tries to keep the active batch full.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But every active request needs KV cache.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So the scheduler must constantly balance:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "compute utilization\nvs\nmemory capacity",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "How does this connect to PagedAttention?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "PagedAttention exists because KV cache memory is difficult to manage efficiently.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Requests have different lengths.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "They start at different times.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "They finish at different times.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "They grow token by token.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So the memory system needs to handle dynamic KV cache allocation.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The core idea is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Continuous batching\nkeeps compute busy.\n\nPagedAttention\nhelps manage KV cache memory efficiently.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This is why memory planning connects directly to vLLM internals.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What about temporary compute memory?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Besides weights and KV cache, inference needs temporary memory.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This includes:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "activations\nattention workspace\nlogits\nsampling buffers\nruntime buffers\ncommunication buffers\nframework overhead",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "During inference, activations are much smaller than training because we do not store everything for backpropagation.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But they still matter.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "They can become more noticeable during:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "large prefill\nlarge batch size\nlong prompts\nmulti-GPU communication",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So we should not plan memory with zero overhead.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is a practical safety margin?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "A practical estimate is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "total memory\n≈\nweights\n+\nKV cache\n+\n10% to 30% overhead",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "For small local experiments, the overhead may be smaller or manageable.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For production systems, I would be more conservative.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "I do not want to run memory at 99%.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Because once the system is near the limit, small changes can cause failures.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Examples:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "slightly longer prompt\nmore concurrent requests\nlarger batch\ndifferent model format\nlarger tokenizer buffers\nruntime allocation spike",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "can push the system over the edge.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How should I calculate memory for CPU inference?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "For CPU inference with llama.cpp, a practical formula is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Required RAM\n≈\nGGUF model size\n+\nKV cache memory\n+\ncompute buffers\n+\nOS memory\n+\nsafety margin",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The easiest first estimate:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Required RAM\n≈\nGGUF file size\n+\nKV cache estimate\n+\n20% overhead",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This is not perfect, but it is useful.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Then the real measurement should come from running the server and reading the logs.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What should I check in llama.cpp logs?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "When starting llama-server, I should look for memory-related logs such as:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "model buffer size\nKV buffer size\ncompute buffer size\ngraph memory\nbackend buffer size",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "These logs are very useful because they show what the runtime actually allocated.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So the practical workflow becomes:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "estimate memory first\nstart the server\nread actual memory logs\ncompare estimate vs reality\nadjust settings\nbenchmark again",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This is how the concept becomes practical.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Which llama.cpp settings affect memory?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Important settings include:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "model file\ncontext size\nparallel slots\nbatch size\nubatch size\nKV cache type\nGPU offload layers\nthread count",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "For CPU inference, context size is especially important.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A larger context means more KV cache memory.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "More parallel slots means more simultaneous sequences.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So even with the same model, changing these settings can change memory usage significantly.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What does context size mean practically?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "If I set a very large context size, I am asking the runtime to support more tokens.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That requires more KV cache memory.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "context size = 4096 ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "uses less KV cache than:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "context size = 32768 ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So I should not set context length much larger than what my workload actually needs.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Large context is useful, but it has a memory cost.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How does this connect to the LLM Inference Workbench?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "This is exactly the kind of thing I want the workbench to help me understand.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For each experiment, I want to track:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "model\nquantization\nGGUF size\nCPU shape\nRAM\ncontext size\nparallel slots\nbatch size\nTTFT\ntokens/sec\np95 latency\nmemory usage ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Then I can compare experiments.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Experiment 1:\nQwen2.5 7B Q4_K_M\ncontext 4096\nparallel 1\n\nExperiment 2:\nsame model\ncontext 8192\nparallel 1\n\nExperiment 3:\nsame model\ncontext 4096\nparallel 4 ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Now I can observe how memory changes.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This is much better than guessing.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What should I compare first?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "I would start with one model and change one variable.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "same model\nsame CPU shape\ndifferent context sizes",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Then compare:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "memory usage\nTTFT\ntokens/sec\nlatency\nstability",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "After that, I can compare quantization formats:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Q4_K_M\nvs\nQ8_0",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Then compare model sizes:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "1.5B\nvs\n7B\nvs\n14B",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The important rule is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "change one variable at a time",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Otherwise, the results become hard to understand.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How should I calculate memory for GPU inference?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "For GPU inference, the formula is similar:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Required GPU memory\n≈\nmodel weights in VRAM\n+\nKV cache in VRAM\n+\nactivation / workspace memory\n+\nruntime overhead\n+\nsafety margin",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "But there is one extra consideration.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "If the model is split across multiple GPUs, the weight memory may be divided.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For tensor parallelism:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "each GPU stores part of the model weights",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "For pipeline parallelism:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "each GPU group stores some layers",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "For data parallelism:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "each replica stores its own copy",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So multi-GPU memory planning depends on the parallelism strategy.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What happens with tensor parallelism?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Suppose a model needs 80 GB of weights.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "If we use tensor parallelism across 4 GPUs, then roughly:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "80 GB / 4\n=\n20 GB per GPU",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "for weights.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This is simplified, but it gives the intuition.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "By sharding weights, each GPU has more remaining memory for KV cache. That can help support larger context or more active requests. But tensor parallelism also adds communication cost.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So memory improves, but communication becomes important.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What happens with data parallelism?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Data parallelism is different. If we create 4 replicas, each replica has its own model copy. So memory is not divided across replicas.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Instead:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Replica 1 → full model copy\nReplica 2 → full model copy\nReplica 3 → full model copy\nReplica 4 → full model copy ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Data parallelism helps concurrency because requests can be spread across replicas.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But each replica needs enough memory to run the model and KV cache for its assigned users.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is the difference between fitting and serving?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "This is a very important distinction.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Fitting means:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Can I load the model?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Serving means:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Can I load the model\nand handle the expected workload?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "A model may fit for one request.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But it may not serve many users.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That is because serving adds:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "concurrency\nlonger KV cache\nbatching\nruntime overhead\nlatency constraints",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So when planning inference memory, I should not stop at:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "model loaded successfully",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That only proves the first step.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is the simplest capacity planning process?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "I can use this process:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "1. Estimate model weight memory.\n\n2. Estimate KV cache per token.\n\n3. Estimate total active tokens.\n\n4. Multiply KV per token by active tokens.\n\n5. Add temporary and runtime overhead.\n\n6. Add safety margin.\n\n7. Run the actual system.\n\n8. Compare estimate with real measurements. ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This gives both a mental model and a practical workflow.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is a simple example?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Suppose:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "model weights = 8 GB\nKV cache per token = 128 KB\nmax tokens per request = 4096\nactive requests = 8\noverhead = 3 GB",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "First calculate KV per request:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "128 KB × 4096\n≈ 512 MB",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Then calculate KV for 8 requests:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "512 MB × 8\n≈ 4 GB",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Now total memory:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "8 GB weights\n+\n4 GB KV cache\n+\n3 GB overhead\n=\n15 GB",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Then add safety margin.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "If we add 20%:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "15 GB × 1.2\n=\n18 GB",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So I would not choose a 16 GB system for this workload.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "I would want something closer to:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "24 GB or more",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That gives space for overhead and variance.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why can estimates be wrong?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Memory estimates can be wrong because real systems have details like:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "alignment\nmetadata\nquantization overhead\nframework buffers\nfragmentation\nmemory preallocation\nbackend-specific buffers\ndifferent KV cache dtypes\ndifferent attention implementations",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So the formula is not meant to be perfect.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It is meant to help us reason before running.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The real answer still comes from measurement.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What metrics should I track?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "For memory experiments, I want to track:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "model file size\nloaded model memory\nKV cache memory\ntotal process memory\navailable system memory\ncontext size\nparallel slots\nbatch size\nTTFT\ntokens/sec\np95 latency\nfailure point",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The failure point is useful.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "works at context 4096\nworks at context 8192\nstarts swapping at context 16384\nfails at context 32768",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That teaches more than a single successful run.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What does this teach about inference systems?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "It teaches that inference is not just compute.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Inference is also memory management.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The system is constantly balancing:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "model size\ncontext length\nconcurrency\nlatency\nthroughput\nmemory capacity",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This is why modern serving engines spend so much effort on:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "KV cache management\ncontinuous batching\nPagedAttention\nprefix caching\nchunked prefill\nrouting\nscheduling",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The hard part is not only generating tokens.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The hard part is generating tokens efficiently for many different requests under limited memory.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How does this connect to CPU inference?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "For CPU inference, memory planning helps answer:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Can this model run on this machine?\nHow large can the context be?\nHow many parallel requests can I support?\nWhen does the system start swapping?\nWhich quantization is practical?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This is very relevant for my LLM Inference Workbench.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "If I can automate experiments around these questions, I can learn much faster.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Instead of saying:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "this model feels slow",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "I can say:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "this model uses this much memory,\nwith this context size,\nand produces this tokens/sec,\non this CPU shape.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That is a much better learning loop.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How does this connect to GPU inference?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "For GPU inference, memory planning helps answer:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Can this model fit in VRAM?\nHow much KV cache can we support?\nHow many active requests can run?\nDo we need tensor parallelism?\nDo we need more replicas?\nDo we need a smaller context limit?\nDo we need quantization?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This is where memory planning becomes architecture planning.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "If one GPU is not enough, we need multi-GPU inference.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "If one replica is not enough, we need more replicas.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "If routing needs to consider cache locality, we need smarter distributed serving.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "And that leads toward systems like llm-d.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is the key mental model?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The key mental model is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Total memory\n=\nweights\n+\nKV cache\n+\noverhead",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "But the deeper intuition is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Weights are the cost of loading the model.\n\nKV cache is the cost of serving the workload.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So when someone asks:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How much memory do I need for this model?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "the answer should be:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For what context length?\nFor how many active requests?\nWith what precision?\nOn CPU or GPU?\nUsing which runtime?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Because the model alone is not enough information.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What comes next?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Now that memory planning is clearer, the next topic becomes very natural.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Once we understand that inference memory depends on:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "KV cache\ncontext length\nactive requests\nrouting\nreplicas\nscheduling",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "the next question is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How do large systems manage this\nacross a Kubernetes cluster?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That leads to:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "llm-d",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Because llm-d is about distributed LLM inference.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It connects many ideas we have already discussed:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "vLLM\nKubernetes\nreplicas\nrouting\nKV-cache-aware scheduling\ndisaggregated serving\ndistributed inference",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So the next article can move from:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How much memory does one inference system need?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "to:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How do we distribute inference\nacross many systems intelligently?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That feels like the right next step.",
+      "type": "paragraph"
+    }
+  ],
+  "images": [],
+  "bodyHash": "18f616ded78100e9c7097a108a99008543dbbeb08f2e9a4a6e6af1ebb8b27a91"
+}

@@ -1,0 +1,911 @@
+{
+  "id": "gvbne",
+  "title": "LLM Inference Challenges - Understanding Data Parallelism",
+  "author": "Anurag Mohan",
+  "date": "May 21, 2026",
+  "url": "https://www.linkedin.com/pulse/llm-inference-challenges-understanding-data-anurag-mohan-gvbne",
+  "blocks": [
+    {
+      "links": [],
+      "text": "Understanding Data Parallelism",
+      "type": "heading"
+    },
+    {
+      "links": [
+        {
+          "text": "previous parts",
+          "url": "https://www.linkedin.com/pulse/inside-llm-inference-anurag-mohan-o0hke"
+        }
+      ],
+      "text": "In the previous parts, we explored why a single GPU is not enough, how tensor parallelism splits tensors across GPUs, and how pipeline parallelism splits layers across stages. At this point, the multi-GPU picture starts becoming much clearer.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But one major question still remains.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Even after distributing the model across many GPUs, how do we actually serve thousands or even millions of users?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That is where data parallelism comes in.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What problem are we solving now?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Tensor parallelism and pipeline parallelism help us run very large models. They solve the problem of model size and computation distribution.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But they do not fully solve concurrency.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Even if a model runs across many GPUs:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "requests still queue up\ndecode is still sequential\nKV cache keeps growing\nusers still compete for the same serving instance",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So the next challenge becomes:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How do we scale to many concurrent users? ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "What does a real multi-GPU setup look like?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Let us build this step by step.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Suppose we have a very large model with 80 layers.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "And suppose:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "one layer itself is too large for one GPU\nthe full model is also too large for one GPU\nand finally we also want to support many users",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Now we need all three techniques together.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Step 1 — What does tensor parallelism look like?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Suppose one layer contains a huge weight matrix like:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "16384 × 16384 ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "One GPU may not have enough memory or compute power.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So we split the tensor across GPUs.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "GPU 1 → first part of weights\nGPU 2 → second part\nGPU 3 → third part\nGPU 4 → fourth part ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Now all 4 GPUs cooperate on:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "the same layer\nthe same request\nthe same computation",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So instead of:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "1 GPU handling the layer ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "we now have:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "4 GPUs handling one layer together ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This is tensor parallelism.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What problem does tensor parallelism solve?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "It mainly solves:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How do we run very large layers? ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "It helps:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "fit larger tensors\ndistribute compute\nreduce memory pressure",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But notice something important.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "All 4 GPUs are still focused on:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "the same request\nthe same model instance",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So this alone does not massively increase concurrency.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Step 2 — What does pipeline parallelism look like?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Now suppose the model has:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "80 transformer layers ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Even with tensor parallelism, the entire model may still not fit efficiently.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So now we split the layers into stages.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Stage 1 → Layers 1–20\nStage 2 → Layers 21–40\nStage 3 → Layers 41–60\nStage 4 → Layers 61–80 ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Now combine this with tensor parallelism.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Suppose:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "each stage uses 4 GPUs\nthose GPUs work together using tensor parallelism",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Now the setup becomes:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Stage 1 → GPUs 1–4\nStage 2 → GPUs 5–8\nStage 3 → GPUs 9–12\nStage 4 → GPUs 13–16 ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Now one request flows like this:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Input\n→ Stage 1 GPUs\n→ Stage 2 GPUs\n→ Stage 3 GPUs\n→ Stage 4 GPUs\n→ Output ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "pipeline parallelism splits the layers\ntensor parallelism splits the tensors inside those layers",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Together:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "16 GPUs cooperate\nto serve ONE model instance ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Does this solve concurrency now?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Not completely.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Even though 16 GPUs are involved:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "they are still serving the same model instance\nusers still share the same serving pipeline\ndecode is still sequential\nrequests still compete for compute and KV cache",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So tensor + pipeline parallelism mainly solve:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How do we run a huge model? ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Not:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How do we serve huge numbers of users? ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That is where data parallelism enters.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Step 3 — What does data parallelism look like?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Now we create multiple copies of that entire 16-GPU setup.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Replica 1 → GPUs 1–16\nReplica 2 → GPUs 17–32\nReplica 3 → GPUs 33–48\nReplica 4 → GPUs 49–64 ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Each replica contains:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "the same weights\nthe same architecture\nthe same tensor parallel setup\nthe same pipeline stages",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Now requests can be distributed.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Batch 1 → Replica 1\nBatch 2 → Replica 2\nBatch 3 → Replica 3\nBatch 4 → Replica 4 ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Or:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Users A–D → Replica 1\nUsers E–H → Replica 2\nUsers I–L → Replica 3\nUsers M–P → Replica 4 ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Now multiple batches and decode loops can run independently.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "THIS is what increases concurrency.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why does data parallelism solve concurrency?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Because replicas are independent.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Each replica has:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "its own weights\nits own KV cache\nits own scheduler\nits own batches\nits own decode loop",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So instead of one giant serving pipeline:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "we now have multiple independent serving pipelines",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This scales throughput much more effectively.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How are user sessions managed?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Once a request is assigned to a replica, it usually stays there.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Because the KV cache for that request already exists inside that replica.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "If the request suddenly moves elsewhere:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "the new replica would not have the KV cache\nattention history would be missing\ngeneration would break or require expensive transfer",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So systems usually use:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "sticky sessions\nor\nsession affinity ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Meaning:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "one user stays attached to one replica during generation",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What does a practical GPU cluster look like?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "At a high level, a GPU cluster is simply many servers connected together.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Each server may contain:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "CPUs\nRAM\nmultiple GPUs\nnetworking hardware\nstorage",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Server\n├── CPU\n├── RAM\n├── 8 GPUs\n├── NVLink connections\n└── Network interfaces ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "How are GPUs connected inside one server?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Inside the same machine:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "GPUs communicate using NVLink or NVSwitch\nbandwidth is extremely high\nlatency is very low",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "GPU ↔ GPU\nVery high-speed communication ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This is why tensor parallel GPUs are often placed inside the same server.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Because tensor parallelism requires constant GPU-to-GPU communication.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What does a larger cluster look like?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Now suppose one server is not enough.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "We connect many servers together.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Rack 1\n├── Server A → 8 GPUs\n├── Server B → 8 GPUs\n├── Server C → 8 GPUs\n\nRack 2\n├── Server D → 8 GPUs\n├── Server E → 8 GPUs\n├── Server F → 8 GPUs ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Now we may have:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "48 GPUs total ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "connected into one cluster.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How do all three techniques work together in practice?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Suppose we build this setup:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "4 pipeline stages\nEach stage uses 8 GPUs with tensor parallelism ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That becomes:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "4 × 8 = 32 GPUs ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This entire 32-GPU setup becomes:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "ONE model replica ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Now suppose we create 4 such replicas:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Replica 1 → Servers 1–4\nReplica 2 → Servers 5–8\nReplica 3 → Servers 9–12\nReplica 4 → Servers 13–16 ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Now:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "tensor parallelism splits tensors\npipeline parallelism splits layers\ndata parallelism scales concurrent users",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This is very close to how large production inference systems operate.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What does request flow look like in practice?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "At this point, let us connect everything together into one real inference flow.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Suppose a user sends a prompt like:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "\"Explain quantum computing...\" ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The request first reaches a router or load balancer.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The router decides:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "which replica should handle the request\nwhich replica currently has capacity\nwhere batching and memory usage look healthy",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Load Balancer\n    ↓\nReplica 2 selected ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Now remember:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Replica 2 itself may contain multiple pipeline stages\neach stage may contain multiple GPUs using tensor parallelism",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Suppose Replica 2 looks like this:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Stage 1 → GPUs 17–24\nStage 2 → GPUs 25–32\nStage 3 → GPUs 33–40\nStage 4 → GPUs 41–48 ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Now the request flows through the model step by step.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Input Prompt\n    ↓\nStage 1 GPUs\n(tensor parallel computation)\n    ↓\nIntermediate output\n    ↓\nStage 2 GPUs\n    ↓\nIntermediate output\n    ↓\nStage 3 GPUs\n    ↓\nStage 4 GPUs\n    ↓\nGenerated token ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Inside each stage:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "multiple GPUs cooperate using tensor parallelism\npartial computations are combined\nactivations are exchanged between GPUs",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Then:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "pipeline stages pass outputs forward\nthe final token is generated\nKV cache is updated inside that replica",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For the next token:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "the request usually stays on the same replica\nbecause the KV cache already exists there",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This process repeats token by token during generation.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So at a high level:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Load Balancer\n    ↓\nModel Replica\n    ↓\nPipeline Stages\n    ↓\nTensor Parallel GPUs\n    ↓\nGenerated Tokens ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This is very close to what happens inside modern large-scale inference systems.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is the key intuition?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Tensor Parallelism:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Split tensors ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Pipeline Parallelism:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Split layers ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Data Parallelism:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Replicate the entire model ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Together, they make large-scale LLM inference possible.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why is this article important?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "At this point, we have built the complete foundation for understanding modern inference systems.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "We now understand:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "KV cache\nbatching\nmemory pressure\nGPU utilization\ntensor parallelism\npipeline parallelism\ndata parallelism\npractical GPU clusters\nrequest routing and session affinity",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Honestly, this may be one of the most important parts of the series.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Before moving to the next stage, I would strongly recommend revisiting Articles 1–7 one more time.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "I am personally doing the same.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "As I started exploring the next phase of inference systems, I realized that if these concepts are not extremely clear, the next topics become very difficult to understand intuitively.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "I have already gone through these concepts multiple times myself just to build a clearer mental model of what is actually happening inside modern inference systems.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What comes next?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Now that the multi-GPU foundation is much clearer, we can start exploring the next layer of real-world inference systems.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This includes topics like:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "distributed serving\nrequest routing\nvLLM architecture\npaged attention\ndisaggregated inference\ncontinuous batching across replicas\nmulti-node communication\nadvanced serving optimizations",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "And this is where things start becoming even more interesting.",
+      "type": "paragraph"
+    }
+  ],
+  "images": [],
+  "bodyHash": "e6937af970af879cd71b23700a3de6789d90ea5cf04564d8cc3e6b27c3998a1e"
+}

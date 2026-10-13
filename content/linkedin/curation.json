@@ -1,0 +1,545 @@
+{
+  "reviewedArticles": [
+    {
+      "sourceKey": "o0hke",
+      "level": "100",
+      "rationale": "Newsletter introduction and a guide to the learning journey.",
+      "lab": "inference",
+      "topics": [
+        "serving as systems engineering",
+        "curriculum overview"
+      ]
+    },
+    {
+      "sourceKey": "lcdee",
+      "level": "100",
+      "rationale": "Builds intuition for why attention state is retained; advanced optimizations are introduced rather than implemented.",
+      "lab": "kv",
+      "topics": [
+        "autoregressive generation",
+        "K/V vectors",
+        "memory growth"
+      ],
+      "clarification": "Clarify tokens versus words and causal attention; retain the original text separately."
+    },
+    {
+      "sourceKey": "8bjge",
+      "level": "200",
+      "rationale": "Explains block allocation, fragmentation, offload, quantization, and exact shared prefixes.",
+      "lab": "paging",
+      "topics": [
+        "logical-to-physical block tables",
+        "fragmented allocation",
+        "prefix matching"
+      ]
+    },
+    {
+      "sourceKey": "cmare",
+      "level": "200",
+      "rationale": "Connects iteration scheduling to the architecture of MHA, MQA, and GQA.",
+      "lab": "attention-heads",
+      "topics": [
+        "continuous batching",
+        "query heads versus KV heads",
+        "MHA/MQA/GQA"
+      ]
+    },
+    {
+      "sourceKey": "z7ede",
+      "level": "200",
+      "rationale": "Distinguishes fitting model state from scaling concurrent demand.",
+      "lab": "parallelism",
+      "topics": [
+        "parameters to bytes",
+        "weights + KV + workspace",
+        "shards versus replicas"
+      ]
+    },
+    {
+      "sourceKey": "qvsve",
+      "level": "300",
+      "rationale": "Shows tensor partitioning and cross-device synchronization within a layer.",
+      "lab": "tensor",
+      "topics": [
+        "scalars/vectors/matrices",
+        "row/column shards",
+        "collective communication"
+      ]
+    },
+    {
+      "sourceKey": "vi12e",
+      "level": "300",
+      "rationale": "Splits model layers into pipeline stages and combines TP with PP.",
+      "lab": "pipeline",
+      "topics": [
+        "stage boundaries",
+        "activation handoff",
+        "pipeline bubbles",
+        "TP inside PP"
+      ]
+    },
+    {
+      "sourceKey": "gvbne",
+      "level": "300",
+      "rationale": "Combines TP, PP, and independent data-parallel model replicas.",
+      "lab": "parallelism",
+      "topics": [
+        "TP×PP×DP GPU count",
+        "per-replica scheduler and cache",
+        "request affinity"
+      ]
+    },
+    {
+      "sourceKey": "ehxof",
+      "level": "300",
+      "rationale": "Follows ingress through a logical multi-node replica and its scheduler.",
+      "lab": "distributed",
+      "topics": [
+        "gateway versus router",
+        "replica as complete serving unit",
+        "prefill/decode request lifecycle"
+      ]
+    },
+    {
+      "sourceKey": "3omve",
+      "level": "300",
+      "rationale": "Relates communication patterns and topology to distributed inference performance.",
+      "lab": "network",
+      "topics": [
+        "NVLink/NVSwitch",
+        "PCIe",
+        "RDMA",
+        "NCCL",
+        "all-reduce"
+      ]
+    },
+    {
+      "sourceKey": "tl4fe",
+      "level": "200",
+      "rationale": "Explains the different work shapes of prefill and decode, including pipeline utilization.",
+      "lab": "phases",
+      "topics": [
+        "prompt parallelism",
+        "autoregressive dependency",
+        "memory/communication sensitivity"
+      ]
+    },
+    {
+      "sourceKey": "i5bre",
+      "level": "200",
+      "rationale": "Explains iteration-level scheduling, KV admission, fairness, queueing, and phase interference.",
+      "lab": "batching",
+      "topics": [
+        "dynamic active set",
+        "memory admission",
+        "TTFT/ITL tradeoff",
+        "chunked prompt work"
+      ]
+    },
+    {
+      "sourceKey": "etkfc",
+      "level": "400",
+      "rationale": "Designs a conversation-level routing policy around cached computation, affinity, migration, and goodput.",
+      "lab": "conversation-routing",
+      "topics": [
+        "model versus replica affinity",
+        "warm versus cold turns",
+        "queue/cache tradeoffs",
+        "conversation boundaries",
+        "SLO goodput"
+      ],
+      "clarification": "KV caching avoids recomputing prior K/V; attention still reads the relevant prior context."
+    },
+    {
+      "sourceKey": "xbm8e",
+      "level": "100",
+      "rationale": "Reviews the series and connects foundational ideas without implementation details.",
+      "lab": "stack",
+      "topics": [
+        "connected inference mental model",
+        "replicas and parallelism",
+        "runtime scheduling"
+      ]
+    },
+    {
+      "sourceKey": "sokpe",
+      "level": "200",
+      "rationale": "Explains logical block tables, allocation on demand, and tail-block waste.",
+      "lab": "paging",
+      "topics": [
+        "contiguous allocation versus paging",
+        "logical-to-physical mapping",
+        "fragmentation",
+        "last-block waste",
+        "dynamic batching"
+      ]
+    },
+    {
+      "sourceKey": "0d1ee",
+      "level": "200",
+      "rationale": "Connects scheduler, KV manager, workers, sampler, and API into an engine overview.",
+      "lab": "engine",
+      "topics": [
+        "API and engine core",
+        "token/KV admission",
+        "prefill/decode loop",
+        "sampling",
+        "completion and block release"
+      ]
+    },
+    {
+      "sourceKey": "xjyve",
+      "level": "100",
+      "rationale": "Builds a broad layered mental model and separates workflow, model, replica, engine, and hardware responsibilities.",
+      "lab": "stack",
+      "topics": [
+        "CUDA/PyTorch/engine layers",
+        "CPU/GPU/NPU roles",
+        "router versus load balancer",
+        "agent orchestration"
+      ],
+      "clarification": "CPU support is runtime/backend-specific; workload fit must be measured rather than inferred from model size alone."
+    },
+    {
+      "sourceKey": "kirye",
+      "level": "200",
+      "rationale": "Defines user-facing latency, system load, memory pressure, tail percentiles, and controlled workload comparisons.",
+      "lab": "metrics",
+      "topics": [
+        "TTFT/ITL/E2E",
+        "input/output throughput",
+        "queue/occupancy/KV pressure",
+        "p50/p95/p99",
+        "cost per token",
+        "bottleneck diagnosis"
+      ],
+      "graphics": [
+        "Inline concept-to-metric mapping table captured locally."
+      ]
+    },
+    {
+      "sourceKey": "0y6oe",
+      "level": "200",
+      "rationale": "A hands-on local llama-server lab that isolates prompt, output, concurrency, and batching variables.",
+      "lab": "experiment",
+      "topics": [
+        "OpenAI-compatible endpoint",
+        "GGUF/Metal/CPU setup",
+        "controlled benchmark experiments",
+        "batch versus ubatch",
+        "failure evidence"
+      ],
+      "clarification": "Time between streamed chunks approximates output cadence and is not automatically true token-level ITL."
+    },
+    {
+      "sourceKey": "mqdqe",
+      "level": "300",
+      "rationale": "Builds a remote inference experimentation workflow with cloud provisioning, private endpoint tunnels, proxying, repeatable benchmarks, and cleanup.",
+      "lab": "workbench",
+      "topics": [
+        "experiment lifecycle",
+        "private SSH tunnel",
+        "runtime deploy",
+        "model catalog",
+        "controlled comparisons",
+        "app-created resource cleanup"
+      ]
+    },
+    {
+      "sourceKey": "4hv1e",
+      "level": "200",
+      "rationale": "Explains GGUF, quantization, runtime selection, backend offload, thread count, build flags, and CPU measurement.",
+      "lab": "quantization",
+      "topics": [
+        "GGUF contents and filenames",
+        "weight precision versus quality",
+        "CPU bandwidth/threads",
+        "native versus portable build",
+        "CPU versus GPU workload fit"
+      ]
+    },
+    {
+      "sourceKey": "kcpre",
+      "level": "200",
+      "rationale": "Derives workload-aware memory planning and connects estimates to measured runtime allocations.",
+      "lab": "memory",
+      "topics": [
+        "weights/KV/workspace",
+        "total active tokens",
+        "GQA KV heads",
+        "context/concurrency",
+        "sharding versus replication",
+        "runtime buffer logs"
+      ],
+      "clarification": "Course calculations use explicit GiB/KiB units and editable architecture assumptions; overhead percentages are illustrative rather than guarantees."
+    },
+    {
+      "sourceKey": "jqjne",
+      "level": "300",
+      "rationale": "Introduces the distributed serving architecture around model engines, including pools, EPP, worker roles, KV indexing, and phase separation.",
+      "lab": "fleet",
+      "topics": [
+        "proxy/EPP/InferencePool/model-server split",
+        "cluster versus engine scheduling",
+        "variants",
+        "disaggregation",
+        "flow control",
+        "workload-aware autoscaling"
+      ]
+    },
+    {
+      "sourceKey": "t6xfe",
+      "level": "400",
+      "rationale": "Develops routing policies with chained cache identity, precise versus approximate indexing, speculative state, eviction, isolation, and multi-signal scoring.",
+      "lab": "cache-routing",
+      "topics": [
+        "Filter/Score/Pick",
+        "cache versus load/capacity",
+        "matched ratio versus absolute length",
+        "approximate versus precise cache index",
+        "speculative indexing",
+        "hotspot avoidance",
+        "tenant salts and compatible model identity"
+      ]
+    },
+    {
+      "sourceKey": "5unre",
+      "level": "100",
+      "rationale": "Explains the educational role of the Atlas and maps ecosystem categories without ranking tools.",
+      "lab": "stack",
+      "topics": [
+        "engine/runtime/platform roles",
+        "community curation",
+        "concepts to tools"
+      ]
+    },
+    {
+      "sourceKey": "ckarc",
+      "level": "300",
+      "rationale": "Explains the control/data handoff and network cost of separating prompt processing from generation.",
+      "lab": "transfer",
+      "topics": [
+        "phase specialization",
+        "compatible KV layouts",
+        "control versus data plane",
+        "worker-pair placement",
+        "transfer critical path",
+        "RDMA/NIXL",
+        "overlap with other requests"
+      ]
+    },
+    {
+      "sourceKey": "hv9te",
+      "level": "300",
+      "rationale": "A hands-on routed Kubernetes CPU-vLLM pool lab including engine settings, capacity limits, and rollout behavior.",
+      "lab": "rollout",
+      "topics": [
+        "EPP routing",
+        "CPU KV capacity",
+        "max sequences and token budget",
+        "thread binding",
+        "prefix experiment design",
+        "Pending pods",
+        "maxSurge/maxUnavailable"
+      ]
+    },
+    {
+      "sourceKey": "cf8ie",
+      "level": "400",
+      "rationale": "Connects controlled workload experiments, demand metrics, pod scaling, node scaling, and measurement boundaries.",
+      "lab": "autoscaling",
+      "topics": [
+        "Prometheus/Grafana/KEDA/HPA",
+        "running/queued requests",
+        "two scaling layers",
+        "Pending→Ready lifecycle",
+        "cache-warm/cold case study",
+        "endpoint versus engine metrics"
+      ],
+      "observations": {
+        "baseline": {
+          "ttftP95ms": 144,
+          "approxITLms": 34,
+          "outputTPS": 41.5
+        },
+        "longUnique": {
+          "ttftP95ms": 764,
+          "approxITLms": 36,
+          "outputTPS": 32.4
+        },
+        "sharedPrefix": {
+          "ttftP95ms": 172,
+          "approxITLms": 36.5,
+          "outputTPS": 39.9,
+          "cacheHitPercent": 53
+        },
+        "longOutput": {
+          "ttftP95ms": 146,
+          "approxITLms": 35.6,
+          "outputTPS": 41.7,
+          "e2eP95seconds": 16
+        },
+        "scaleOut": {
+          "activeRequests": 8,
+          "thresholdPerReplica": 4,
+          "desiredReplicas": 2
+        }
+      },
+      "clarification": "These numbers are observations from the author's specific lab, not predictions or transferable hardware rankings."
+    },
+    {
+      "sourceKey": "oplvc",
+      "level": "400",
+      "rationale": "Builds an SLO-safe capacity plan from workload distributions, measured goodput, warm capacity, failure headroom, and scaling delay.",
+      "lab": "capacity",
+      "topics": [
+        "capacity knee",
+        "Little's law",
+        "goodput versus maximum throughput",
+        "configured threshold versus measured capacity",
+        "N+1",
+        "allocatable resources",
+        "burst backlog",
+        "time to usable capacity"
+      ]
+    },
+    {
+      "sourceKey": "bxwse",
+      "level": "300",
+      "rationale": "Connects persistent storage, active memory, scale-up/scale-out fabrics, GPU platforms, optimized runtimes, and packaged serving.",
+      "lab": "nvidia-stack",
+      "topics": [
+        "HBM versus NVMe versus fabric",
+        "NVLink/NVSwitch/RDMA",
+        "HGX versus DGX versus cloud shape",
+        "CUDA/TensorRT-LLM/Triton/NIM",
+        "alternative serving paths"
+      ],
+      "clarification": "Triton and NIM are not mandatory consecutive boxes. Hardware fabrics and cloud offerings are source-date-specific."
+    },
+    {
+      "sourceKey": "uh5ve",
+      "level": "300",
+      "rationale": "Separates model, provider, and replica routing, and considers task quality, token shape, conversation affinity, and switching costs.",
+      "lab": "conversation-routing",
+      "topics": [
+        "capability-first model selection",
+        "provider/deployment eligibility",
+        "model versus replica affinity",
+        "cross-model cold prefill",
+        "routing evaluation by task slice"
+      ]
+    },
+    {
+      "sourceKey": "gqljc",
+      "level": "400",
+      "rationale": "Defines benchmark layers, workload matrices, open/closed arrival models, reproducibility, cache conditions, and SLO-aware goodput.",
+      "lab": "benchmark",
+      "topics": [
+        "execution-path versus endpoint versus standardized benchmark",
+        "closed-loop versus open-loop load",
+        "offered versus attained rate",
+        "cold/warm variants",
+        "benchmark card",
+        "raw traces and repetitions"
+      ]
+    },
+    {
+      "sourceKey": "r5oec",
+      "level": "400",
+      "rationale": "Breaks time to usable capacity into infrastructure, image, runtime, weight loading, memory setup, warmup, and readiness, separate from prefix cache warmth.",
+      "lab": "cold-start",
+      "topics": [
+        "Pending versus Ready",
+        "container/model artifact caches",
+        "weights→tensors→device memory",
+        "CUDA/workers/graphs",
+        "model warm versus prefix warm",
+        "predictive/warm capacity tradeoff"
+      ]
+    },
+    {
+      "sourceKey": "far6c",
+      "level": "400",
+      "rationale": "Models a user task as a stateful chain of inference and external tool calls, including context growth, retries, affinity, and compounded tail latency.",
+      "lab": "workflow",
+      "topics": [
+        "calls per task",
+        "tool wait versus GPU work",
+        "new prefills after tool results",
+        "independent stage success probability",
+        "workflow goodput",
+        "task-aware routing and scaling"
+      ]
+    },
+    {
+      "sourceKey": "2dzgf",
+      "level": "400",
+      "rationale": "Extends inference scheduling and capacity planning to media preparation, encoding, effective context, distinct cache layers, and heterogeneous batching.",
+      "lab": "multimodal",
+      "topics": [
+        "media retrieval/decode/preprocess/encoder",
+        "processed input shape",
+        "encoder cache versus KV/prefix cache",
+        "effective context",
+        "sampling/tiling accuracy tradeoffs",
+        "cross-attention/resampler exceptions"
+      ]
+    },
+    {
+      "sourceKey": "ouxxf",
+      "level": "400",
+      "rationale": "Designs routing as hard eligibility filters plus evaluated policy, with direct, cascade, and fallback paths and distinct MoE routing.",
+      "lab": "routing-policy",
+      "topics": [
+        "model/provider/replica/MoE routing",
+        "mandatory capability gates",
+        "task-specific evaluation",
+        "direct/cascade/fallback",
+        "routing regret",
+        "retry-inclusive cost"
+      ]
+    },
+    {
+      "sourceKey": "5cxge",
+      "level": "400",
+      "rationale": "Separates evidence, learned structured judgments, deterministic calculations, policy actions, calibration, and optional generated explanations.",
+      "lab": "decisions",
+      "topics": [
+        "state/instructions/criteria",
+        "Choice/Noul/Score",
+        "independent question probabilities",
+        "calibration versus confidence",
+        "code-owned arithmetic and policy",
+        "shadow evaluation",
+        "version pinning"
+      ],
+      "clarification": "All demonstrated probabilities are illustrative; the app does not call Jev or make security or financial decisions."
+    },
+    {
+      "sourceKey": "ess3e",
+      "level": "400",
+      "rationale": "Defines separate functional, answer-quality, and performance release gates, controlled baselines, distribution/tail checks, canaries, and rollback.",
+      "lab": "release-gates",
+      "topics": [
+        "functional/quality/performance gates",
+        "fixed workload and cache state",
+        "known-good baseline plus absolute SLO",
+        "repeatable distribution comparisons",
+        "PR/nightly/release/canary ladder",
+        "exact image promotion",
+        "router task outcomes"
+      ],
+      "graphics": [
+        "Original proposed OCI inference CI workflow imported locally."
+      ]
+    }
+  ],
+  "importedAt": "2026-10-13",
+  "levelDefinitions": {
+    "100": "Foundational intuition and the ecosystem map.",
+    "200": "Engine internals, memory arithmetic, local runtimes, and controlled first experiments.",
+    "300": "Multi-device topology, distributed serving, routing architecture, and Kubernetes deployment.",
+    "400": "Production policy, state-aware scheduling, workload design, capacity, measurement, and release validation."
+  }
+}

@@ -1,0 +1,288 @@
+{
+  "id": "ess3e",
+  "title": "Your Inference Server Passes CI—but Is It Safe to Ship?",
+  "author": "Anurag Mohan",
+  "date": "October 12, 2026",
+  "url": "https://www.linkedin.com/pulse/your-inference-server-passes-cibut-safe-ship-anurag-mohan-ess3e",
+  "blocks": [
+    {
+      "links": [],
+      "text": "Your Inference Server Passes CI—but Is It Safe to Ship?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Imagine updating a dependency in your inference server. The container builds, the model loads, and the API tests pass. Streaming works. Everything looks ready.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Then real traffic arrives, and users wait longer for the first token. There is no crash or obvious error. The service still answers, but the experience has become worse.",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "Red Hat Developer",
+          "url": "https://developers.redhat.com/articles/2026/09/17/catching-poor-llm-performance-and-accuracy-before-deployment?utm_source=chatgpt.com"
+        }
+      ],
+      "text": "Red Hat’s September 2026 report illustrates this class of problem with a GPT-OSS-120B serving regression on NVIDIA H100 associated with a Triton kernel update. Kernels are the low-level routines that execute computation on the GPU. A change underneath the serving engine can affect performance even when the API remains functional. Red Hat Developer",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "After exploring inference optimizations, benchmarking, and routing, this feels like the next question: how do we make acceptable performance and answer quality requirements for shipping a release?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "If the server returns an answer, what else needs to pass?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "I would separate the release decision into three questions.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Does it work? Check API behavior, streaming, cancellation, and error handling. If a client disconnects, does the server stop processing the request? If an input is invalid, does it return the expected error?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Are the answers still good? A successful response can contain an incorrect answer. A tool call can have valid JSON while selecting the wrong tool or supplying the wrong arguments.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Use a fixed set of representative tasks: extracting fields, answering questions from supplied documents, or completing a tool workflow. Define success for each task. For open-ended answers, use a consistent rubric rather than requiring identical wording.",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "vLLM",
+          "url": "https://docs.vllm.ai/en/stable/benchmarking/cli/"
+        }
+      ],
+      "text": "Does it meet service targets? Measure how long users wait for the first output, how smoothly tokens arrive afterward, and how much work the system completes under load. vLLM",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "vLLM Blog",
+          "url": "https://vllm.ai/blog/2026-07-16-keeping-vllm-production-quality"
+        }
+      ],
+      "text": "vLLM describes separate release gates for its full CI suite, performance benchmarks, and model accuracy evaluations. Its release process requires all three to pass. That separation makes sense: passing one does not establish the other two. vLLM Blog",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So a throughput improvement could still fail the release?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Yes. Suppose a candidate serves more requests per second, but users wait substantially longer before responses begin.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That could be useful for a batch workload and unacceptable for an interactive assistant.",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "GuideLLM Docs",
+          "url": "https://vllm-project.github.io/guidellm/stable/guides/metrics/"
+        }
+      ],
+      "text": "This is where goodput becomes useful again: the rate of completed requests that satisfy the defined service objectives. Raw throughput can remain high while goodput falls because too many requests miss their latency targets. Answer quality still needs its own evaluation. GuideLLM Docs",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why is comparing two inference releases so difficult?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Because “same model” does not mean “same experiment.”",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For a comparison, I would record the model revision, tokenizer, chat template, precision, hardware, driver versions, serving configuration, and benchmark version. Keep those fixed except for the change being evaluated.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Then preserve the workload: prompt lengths, output limits, arrival rates, concurrency, and the mix of tasks.",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "GitHub",
+          "url": "https://github.com/vllm-project/guidellm"
+        }
+      ],
+      "text": "A short classification prompt and a long document summarization request put different demands on the server. Testing one request at a time also tells us little about how the deployment behaves when requests compete for capacity. Tools such as GuideLLM support configurable workloads and concurrency or request-rate sweeps for this reason. GitHub",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "vLLM",
+          "url": "https://docs.vllm.ai/en/stable/benchmarking/cli/?utm_source=chatgpt.com"
+        }
+      ],
+      "text": "Cache state needs equal attention. Repeating prompts can reuse cached prefix computation and make a later run appear faster. vLLM’s benchmarking documentation explicitly warns about this. Control cache reuse, and test both cold and warm conditions where they reflect production. vLLM",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "I would compare a candidate against both a known-good baseline and the application’s absolute service targets. Matching the previous release is insufficient if both miss the target.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But benchmark results fluctuate. How do we avoid blocking every release?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A small change in a mean or percentile deserves investigation, but it does not automatically establish a regression.",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "Red Hat Developer",
+          "url": "https://developers.redhat.com/articles/2026/09/17/catching-poor-llm-performance-and-accuracy-before-deployment"
+        }
+      ],
+      "text": "Red Hat found that fixed percentage thresholds could produce false positives in short runs. It added Wasserstein distance as a secondary check alongside individual statistics. This measures how far two distributions are apart—think of moving one latency distribution until it matches the other. Red Hat Developer",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The practical lesson is to examine the distribution and repeat questionable measurements.",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "GuideLLM Docs",
+          "url": "https://vllm-project.github.io/guidellm/stable/guides/metrics/"
+        }
+      ],
+      "text": "A small overall distribution change can still hide a problem in the slowest requests. Keep explicit tail-latency checks, such as p95 or p99, and collect enough requests to make those estimates useful. GuideLLM’s metrics documentation explains both sample-size limits and why comparing runs requires repeated measurements. GuideLLM Docs",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Does this also apply to model routers?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Yes. A routing change changes the workload reaching each model and serving pool.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Imagine a router sends more requests to a smaller model. Each attempt becomes cheaper, but that model struggles with some tasks. Retries and fallback calls increase. Its serving pool also becomes congested.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The routing decision looked economical in isolation. The complete task can now take longer and cost more.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "I would replay a representative request mix through the complete routing path and measure task success, fallback frequency, attempts per task, tail latency, and cost per successful task. Include the cost and delay of failed attempts and fallbacks.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Keep two decisions distinct:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Model selection chooses which model handles the task. It changes the capability and cost tradeoff.\nReplica selection chooses which instance of that model receives the request. It changes where the request encounters queues and potentially reusable cached context.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For multi-turn workloads, test complete conversations. A route that performs well on isolated prompts may behave differently when later turns depend on earlier outputs.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What would a practical testing workflow look like?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "I would build a testing ladder, with depth matched to the change.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "On pull requests, run fast functional checks and a small quality suite covering important application behaviors. Add targeted performance tests when the change touches kernels, scheduling, quantization, caching, or routing. A router update should exercise its decision path and fallback behavior.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Nightly, run broader benchmarks across the model and hardware combinations you actually operate. Sweep concurrency and arrival rates, repeat measurements, and include representative prompt and output lengths. Separate steady-state tests from startup tests so each answers a clear question.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For release candidates, test the exact image and configuration intended for deployment, including the gateway and router where applicable. Set acceptance criteria before inspecting results: required task success, latency targets at expected load, and an acceptable cost per successful task.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For example, an interactive service might require 95% of requests to receive their first output within one second at its planned request rate. That is an illustrative target; each application needs its own.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "When a candidate fails, retain the workload, raw outputs, timing data, and configuration needed to investigate. After a fix, rerun the affected checks and the broader checks its scope warrants.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "After deployment, begin with a canary: expose a small portion of traffic to the candidate and monitor the same quality, latency, error, and cost signals. Define rollback conditions before expanding traffic.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The principle I would carry forward is this: move useful feedback earlier, and match test depth to the change’s risk. Inference performance and answer quality belong in the release decision.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Next, I want to explore this hands-on on OCI. Getting an inference server running is the starting point. I also want to understand the DevOps work around it: checking answer quality, catching performance regressions, and managing releases as models and serving configurations change. The graphic below outlines the workflow I’ll be experimenting with, using OCI services and tools like GuideLLM to test, release, and monitor an inference service.",
+      "type": "paragraph"
+    }
+  ],
+  "images": [
+    {
+      "alt": "Article content",
+      "url": "https://media.licdn.com/dms/image/v2/D4E12AQGjTAIavrZFQQ/article-inline_image-shrink_1000_1488/B4EaEr1BcRI4AI-/0/1791736683055?e=1793232000&v=beta&t=PtWBAZYXqQANWJ9HZPrjKmxy6g7dgy76D2aqpIdxwNI",
+      "localPath": "/article-images/ess3e-1.png",
+      "description": "Proposed OCI inference CI: code repository → managed build → immutable OCIR image → OKE functional, answer-quality, and GuideLLM performance jobs → Object Storage reports → custom release gate → canary deployment and monitored rollout/rollback."
+    }
+  ],
+  "bodyHash": "9384376d9c7a79fb17f407a64715e22b3f1003419146b7360bc4c39bee1551d3"
+}

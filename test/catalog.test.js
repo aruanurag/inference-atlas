@@ -29,7 +29,7 @@ test('catalog contains the reviewed 73 unique, complete entries', () => {
 
 test('catalog separates GPU-only engines from CPU-capable local runtimes', () => {
   const byId = new Map(tools.map((tool) => [tool.id, tool]));
-  assert.deepEqual(byId.get('vllm').supportedHardware, ['gpu']);
+  assert.deepEqual(byId.get('vllm').supportedHardware, ['gpu', 'cpu']);
   assert.deepEqual(byId.get('sglang').supportedHardware, ['gpu']);
   assert.ok(byId.get('llama-cpp').supportedHardware.includes('cpu'));
   assert.ok(byId.get('openvino-genai').supportedHardware.includes('cpu'));

@@ -1,0 +1,951 @@
+{
+  "id": "mqdqe",
+  "title": "Building My Own Small Inference Cloud",
+  "author": "Anurag Mohan",
+  "date": "July 1, 2026",
+  "url": "https://www.linkedin.com/pulse/building-my-own-small-inference-cloud-anurag-mohan-mqdqe",
+  "blocks": [
+    {
+      "links": [],
+      "text": "A Local Workbench for Running LLM Inference Experiments on OCI",
+      "type": "heading"
+    },
+    {
+      "links": [
+        {
+          "text": "https://github.com/aruanurag/llm-inference-lab/tree/main/apps/oci-inference-cloud",
+          "url": "https://github.com/aruanurag/llm-inference-lab/tree/main/apps/oci-inference-cloud"
+        }
+      ],
+      "text": "https://github.com/aruanurag/llm-inference-lab/tree/main/apps/oci-inference-cloud",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Over the last few articles, I have been learning and writing about LLM inference systems. I started with concepts like KV cache, batching, GPU utilization, multi-GPU inference, request routing, prefill vs decode, continuous batching, PagedAttention, vLLM architecture, CPU inference, and model routing.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Most of those articles were conceptual. But while writing them and doing hands-on experiments, I noticed something very practical: I was repeating the same setup steps again and again.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Each experiment usually involved:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "creating infrastructure\nsetting up a machine\ninstalling the inference runtime\ndeploying llama.cpp\ndownloading a model\nstarting the server\nexposing an endpoint\nrunning benchmarks\ncomparing results\ncleaning up infrastructure",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That repetition made me think:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Can I build a small tool\nthat helps me set up inference experiments faster? ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That is where this project started.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The app is an early MVP of a local inference cloud workbench. The goal is simple: provision infrastructure, deploy an inference runtime, expose a local endpoint, run benchmarks, try small apps, compare results, and repeat quickly.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It is not a finished product. It is more like a learning tool that I can keep improving as I move deeper into inference systems.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why did I build this?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "When learning infrastructure-heavy topics, reading alone is not enough. At some point, I want to actually run things.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "I want to:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "measure latency\ncompare throughput\ntest CPU inference\ntry different model sizes\ncompare shapes and OCPU counts\neventually move to GPUs\nlater explore Kubernetes and cluster deployments",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But every experiment has setup cost. If setup takes too long, I run fewer experiments. If I run fewer experiments, I learn slower.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So the goal of this tool is to reduce friction. I wanted something that lets me quickly:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "create an experiment\npick infrastructure\ndeploy a model\nrun inference\nbenchmark results\ntry an app\nclean everything up",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The faster this loop becomes, the more experiments I can run.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is this app?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The app is called:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "OCI Inference Cloud",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "It is a local hackathon-style workbench for inference experiments. Right now, it focuses on OCI and uses your existing OCI CLI profiles.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The current MVP can:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "provision an OCI CPU/HPC instance for an experiment\ndeploy llama.cpp\nexpose a private OpenAI-compatible endpoint through a local backend proxy\nrun benchmark presets\nprovide sample applications for direct chat and routing experiments\nterminate app-created infrastructure from the selected experiment",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Instead of manually setting up everything each time, the app gives me a repeatable workflow for running inference experiments.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why local-first?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "This part was important to me. The app is intentionally local-first.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "uses existing OCI CLI profiles\ndoes not store OCI API keys\ngenerates SSH keys under ~/.llm-inference-cloud/\nkeeps benchmark results outside the Git repo\nuses SSH tunnels instead of exposing llama-server publicly\ncan terminate the infrastructure it created for an experiment",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That design keeps the system easier to understand, easier to debug, and easier to clean up.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What does it do today?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The current flow looks like this:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Create or select an experiment.\nLoad OCI context.\nSelect existing networking.\nProvision a CPU/HPC instance.\nDeploy llama.cpp.\nSelect a GGUF model.\nRun benchmark presets.\nStart the local endpoint proxy.\nTry sample apps.\nDelete infrastructure when done.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That is already enough to make hands-on inference experimentation much more enjoyable.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The current model catalog includes:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Qwen2.5 1.5B Instruct Q4_K_M\nQwen2.5 7B Instruct Q4_K_M\nQwen2.5 7B Instruct Q8_0\nQwen2.5 14B Instruct Q4_K_M\ncustom directly downloadable GGUF URL",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The custom GGUF option is useful because I do not want the tool to be limited to only a few hardcoded models.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why llama.cpp first?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "For the first version, I started with llama.cpp because I wanted to explore CPU inference seriously.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A lot of inference discussions quickly move to GPUs, and GPUs are obviously important. But CPU inference is also interesting for:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "smaller models\nquantized models\nlocal inference\nedge inference\ncost-sensitive workloads\nexperimentation without large GPU infrastructure",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It is also just fun. Running your own model, exposing your own endpoint, and talking to it through a small app feels very different from only calling a hosted API.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why OCI?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Right now, this MVP is based on OCI because that is where I was testing infrastructure and CPU/HPC shapes.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "I was also surprised by the performance I was seeing for CPU-based inference. That made the experiment more interesting.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The broader question I wanted to explore was:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How far can we push useful inference\nwithout immediately jumping to GPUs?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This does not mean CPU replaces GPU. That is not the point.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The better mental model is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Use the right hardware\nfor the right inference workload.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "A small quantized model may work well on CPU. A larger model, long-context workload, or high-throughput serving system may need GPUs. A future inference platform may use both.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The bigger vision",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The longer-term idea in my mind is something like a small personal inference cloud.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "I was thinking about platforms like Nebius and other AI cloud systems where you can provision inference infrastructure and then connect applications to model endpoints. I wanted a much smaller, learning-focused version of that idea.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A future version could look like this:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Choose cloud.\nChoose hardware.\nChoose model.\nChoose inference engine.\nDeploy endpoint.\nRun benchmark.\nConnect app.\nCompare cost and performance.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Today, the app starts with OCI and llama.cpp. Later, I can imagine adding:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "GPU inference\nvLLM\nKubernetes\nmulti-node deployments\nmodel routing\nbenchmark dashboards\nobservability\ncost comparison\nexperiment history",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The current version is only the first step, but it gives me a foundation to keep building on.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What are the sample apps?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Right now, the project includes two simple sample apps.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The first one is a direct CPU chat app. It talks directly to the local endpoint exposed by the OCI inference workbench.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The second one is a router chat app. It can use the CPU endpoint and also connect to an OpenAI model.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This makes it useful for exploring basic routing ideas:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Simple request → local CPU model\n\nMore complex request → larger hosted model",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This connects nicely to the model routing ideas I have been exploring. Eventually, I want this to become a playground for testing routing strategies, comparing outputs, and understanding when smaller local models are good enough.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What does the architecture look like?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "At a high level, the app has two main parts:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Backend\nFrontend",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The structure looks like this:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "apps/oci-inference-cloud/\n├── backend/\n│   ├── app/\n│   ├── tests/\n│   └── requirements.txt\n└── frontend/\n    ├── src/\n    └── package.json",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The backend and frontend run locally. The OCI instance runs the remote llama-server, but the remote server stays bound to:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "127.0.0.1:8080",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "on the OCI instance. The local backend reaches it through an SSH tunnel.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The local app exposes an OpenAI-compatible endpoint like this:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "POST http://127.0.0.1:8090/api/experiments/{experiment_id}/endpoint/v1/chat/completions",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The simple mental model is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Browser\n  ↓\nLocal frontend\n  ↓\nLocal backend\n  ↓\nSSH tunnel\n  ↓\nRemote llama-server on OCI",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So the model server is not publicly exposed. The app talks to it through a local proxy.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Before trying it",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "You should have:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "OCI CLI configured\nan OCI profile available\naccess to create compute instances\nexisting OCI networking\nPython 3\nNode.js and npm\nGit",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The app uses your existing OCI CLI context, so you do not need to paste OCI API keys into the app.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Run the backend",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "From the repository:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "cd apps/oci-inference-cloud/backend\npython3 -m venv .venv\nsource .venv/bin/activate\npip install -r requirements.txt\nuvicorn app.main:app --reload --port 8090",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The backend runs on:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "http://127.0.0.1:8090",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Run the frontend",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "In another terminal:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "cd apps/oci-inference-cloud/frontend\nnpm install\nnpm run dev",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Open:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "http://127.0.0.1:5173",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Now the local UI should be available.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Create your first experiment",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Inside the UI, create or select an experiment.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "I like this structure because each test becomes easier to track. For example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Experiment 1 → Qwen2.5 1.5B on a smaller CPU shape\nExperiment 2 → Qwen2.5 7B on a larger CPU shape\nExperiment 3 → same model with native build enabled\nExperiment 4 → different OCPU count",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This makes comparison easier than running disconnected scripts.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Experiment flow",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "A typical experiment looks like this:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Create or select an experiment.\nLoad OCI context.\nSelect existing networking.\nProvision a CPU/HPC instance.\nDeploy llama.cpp.\nPick a model from the catalog or provide a custom GGUF URL.\nRun benchmark presets.\nStart the local endpoint proxy.\nUse the endpoint from a sample app.\nDelete infrastructure when done.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For the first run, I would start with a smaller quantized model. A smaller model gives a faster feedback loop. Once that works, move to larger models and compare behavior.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Native build mode",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The app also supports advanced deploy settings.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "By default, the portable llama.cpp build is safer because it works across different shapes. But if you want better performance for a specific machine, you can enable native build mode:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "-DGGML_NATIVE=ON",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This lets llama.cpp compile for the selected shape’s available CPU features.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "If native mode fails with:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "unsupported instruction 'vpdpbusd'",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "keep native mode enabled but also enable:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Disable VNNI instructions",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "in Advanced settings.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This is exactly the kind of hands-on detail that makes experimentation useful. You do not just learn the theory. You learn what actually breaks.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Run benchmarks",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "After deployment, run benchmark presets.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The app includes a Throughput comparison preset. The recommended flow is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Create experiment 1.\nDeploy llama.cpp.\nRun the Throughput comparison preset as the Primary run.\nCreate experiment 2.\nChange one variable.\nRun the same preset as the Comparison run.\nReview the comparison table.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The important part is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Change one variable.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "For example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Experiment 1:\nQwen2.5 7B Q4_K_M\nPortable build\nShape A\n\nExperiment 2:\nQwen2.5 7B Q4_K_M\nNative build\nSame shape",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Now the comparison is meaningful.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The benchmark comparison focuses on:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "approximate output tokens/sec\noutput characters/sec\nrequests/sec\np95 latency\np95 TTFT\nrelative throughput versus the best Primary run",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "These metrics connect directly to the inference concepts I have been learning: TTFT, latency, throughput, and tokens/sec.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Start the endpoint proxy",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "After the model is deployed, open the Hackathon view and start the local endpoint proxy.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The generated endpoint looks like this:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "CPU_ENDPOINT_URL=http://127.0.0.1:8090/api/experiments/1/endpoint/v1",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This is the endpoint the sample apps can use.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Run the direct CPU chat app",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The first sample app talks directly to the CPU endpoint:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "cd examples/direct-cpu-chat\nnpm install\nCPU_ENDPOINT_URL=http://127.0.0.1:8090/api/experiments/1/endpoint/v1 PORT=3001 npm run dev",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Now you can talk to your own model running on the OCI instance.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This is the fun part. After spending so much time reading about inference systems, there is something satisfying about sending a message to your own endpoint and seeing the response come back.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Run the router chat app",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The second sample app can use the CPU endpoint and an OpenAI model:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "cd examples/router-chat\nnpm install\nCPU_ENDPOINT_URL=http://127.0.0.1:8090/api/experiments/1/endpoint/v1 \\\nOPENAI_API_KEY=replace-with-your-key \\\nOPENAI_MODEL=gpt-4.1-mini \\\nPORT=3002 \\\nnpm run dev",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This starts connecting to a bigger idea:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Not every request needs the same model.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "A local CPU model may be enough for some requests. A larger hosted model may be better for others.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Eventually, this can evolve into a routing playground:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Simple chat → CPU model\nComplex reasoning → hosted model\nPrivate local task → local model\nLong analysis → stronger endpoint",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That is the type of experiment I want to run more often.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Where is app data stored?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The app stores generated state outside the repo:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "~/.llm-inference-cloud/\n├── state.db\n├── keys/\n├── prompts/\n├── benchmarks/\n└── logs/",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This keeps generated keys, logs, prompts, and benchmark results separate from the Git repo.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Cleanup",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "When the experiment is done, use:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Delete infra",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "from the selected experiment.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This terminates the app-created OCI infrastructure.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For any tool that provisions cloud resources, cleanup should be part of the normal workflow:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Create experiment\nRun benchmark\nSave results\nDelete infra",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Not:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Create experiment\nForget instance\nFind surprise bill later",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Why this matters for my learning series",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "This project feels like a transition point in my learning.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The earlier articles helped build the mental model. Now I want to move more toward implementation.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "I still want to write conceptual articles, but I also want more hands-on work:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "run models\nmeasure latency\ncompare throughput\ntest CPU shapes\nmove to GPUs\ndeploy with Kubernetes\ntry routing\nvisualize benchmark results",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This app gives me a small lab environment for future articles.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What comes later?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "This MVP starts with OCI, CPU inference, llama.cpp, benchmarks, and two sample apps.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Future improvements could include:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "GPU support\nvLLM deployments\nKubernetes support\nmulti-node experiments\nbetter benchmark dashboards\ncost comparison\nmore model catalogs\nmodel routing policies\nobservability\nexperiment export\nteam or hackathon workflows",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "As I continue the learning series, I want the tool to grow with the topics I am learning.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "When I study GPU inference, the app should support GPU experiments. When I study Kubernetes, the app should support Kubernetes deployments. When I study routing, the router app should become more capable. When I study observability, benchmark visualization should improve.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Main idea",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The main idea is simple:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Make inference experiments easier to repeat.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Once experiments become easier to repeat, learning becomes faster.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "I can test more models, compare more shapes, see real numbers, understand latency and throughput through actual runs, and connect theory with practice.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Final thoughts",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "This is still an MVP. There will be rough edges, missing features, and many things to improve.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But I am happy with this first version because it solves a real problem in my own learning workflow.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It helps me move from:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "reading about inference systems",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "to:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "running inference systems",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "If you are also learning LLM inference, CPU inference, model serving, or LLMOps, feel free to try it out.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Fork the repo. Run an experiment. Try the sample apps. Open an issue if something breaks. Raise a PR if you want to improve it.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "I will keep working on this as I move deeper into GPUs, Kubernetes, routing, and distributed inference.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This is just the first iteration, but it already makes the learning process much more fun.",
+      "type": "paragraph"
+    }
+  ],
+  "images": [],
+  "bodyHash": "a59b6e47e551c8f2ea77b1e481033599db0a7e2adb6da945a2258c0a94be6339"
+}

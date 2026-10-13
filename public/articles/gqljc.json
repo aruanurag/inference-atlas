@@ -1,0 +1,230 @@
+{
+  "id": "gqljc",
+  "title": "Benchmarking LLM Inference—What Are We Actually Measuring?",
+  "author": "Anurag Mohan",
+  "date": "September 9, 2026",
+  "url": "https://www.linkedin.com/pulse/benchmarking-llm-inferencewhat-we-actually-measuring-anurag-mohan-gqljc",
+  "blocks": [
+    {
+      "links": [],
+      "text": "As I started looking at LLM inference benchmarks, I kept seeing results that said a certain CPU, GPU, model server, or engine was “better.”",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Better at what?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That question matters more than the benchmark tool itself. A CPU can be the better choice for a low-volume, latency-sensitive workload at a given cost. A GPU can be the better choice for a high-concurrency workload. Both statements can be true, even for the same model, because they may describe completely different tests.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This is why GuideLLM, vllm bench serve, NVIDIA GenAI-Perf, llama-bench, and MLPerf Inference are not simply different ways to produce one score. They answer different questions.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The mental model I am carrying forward is this: a benchmark is not a score; it is a conditional statement about a system under a workload.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "First, decide which layer is being measured",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "There are three very different kinds of benchmarking:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Local execution-path benchmarking: “How quickly does this model artifact execute on this machine with this runtime configuration?” llama-bench belongs here.\nServing-system benchmarking: “How does a deployed service behave when requests arrive at a particular rate or concurrency?” vllm bench serve, GuideLLM, and GenAI-Perf belong here.\nStandardized system benchmarking: “How does one complete hardware-and-software system compare with another under common rules?” MLPerf Inference belongs here.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The phrase “under a workload” is the missing part of many benchmark conversations. Before reading any tokens-per-second number, I want to know the prompt shape, output shape, arrival pattern, cache condition, and latency target behind it.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "If a CPU performs “better,” what did we actually test?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The answer should never be just “we ran the model.” At minimum, a benchmark needs to state:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The model artifact: model revision, quantization, tokenizer, context limit, and sampling settings. Changing the quantization or tokenizer can make two runs incomparable.\nThe input distribution: the actual prompt-token distribution, not only an average. Long inputs stress prefill and KV-cache capacity.\nThe output distribution: both target and actual generated-token distribution. Long outputs emphasize decode and inter-token latency.\nThe traffic model: closed-loop concurrency or open-loop request rate; steady, bursty, or trace replay. Queueing and batching behave differently under each.\nThe cache state: cold or warm cache, prefix reuse, session affinity, and cache-hit rate where available. A warm shared prefix can change both TTFT and capacity.\nThe success target: SLOs for TTFT, token cadence, end-to-end latency, errors, and cost. Peak throughput may be irrelevant if the user experience fails.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This is how I would make a CPU-versus-GPU claim honestly:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For this quantized model, at this low offered load, with this interactive prompt/output mix, the CPU met the P95 TTFT and token-cadence SLO at a lower cost per successful request. At higher offered load, the GPU delivered more goodput.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That is a useful engineering result because it explains the trade-off instead of hiding it.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Use a workload matrix, not one benchmark",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "One fixed test—such as a 512-token prompt and 128-token completion—can be useful for regression testing, but it is not a representation of every application. I would use a small workload matrix instead.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Interactive chat / decode-heavy: 128–512 input tokens and 256–1,024 output tokens; 1–8 concurrent users; streaming; mostly cold requests. This tells us about token cadence, P95 time per output token, and perceived responsiveness.\nRAG / prefill-heavy: an input distribution such as P50 4K and P95 8K tokens, with 64–256 output tokens; run a rate sweep with cold and warm-prefix variants. This tells us about TTFT, prefill capacity, KV-cache pressure, and the effect of retrieval context.\nGeneral assistant / mixed: 512–2K input tokens and 128–512 output tokens, with Poisson or trace-like arrivals and realistic bursts. This exposes the balance of TTFT, decode speed, queueing, and goodput.\nOffline batch: prompt and output sizes based on the batch job, run at high concurrency or maximum sustainable throughput. This is where total tokens/second, cost, power, and time to finish matter most.\nMulti-turn / cache-aware: a shared system prompt or conversation history plus a small incremental turn; compare session affinity on and off, and cold versus reused-prefix requests. This tells us whether cache reuse and routing improve the end-to-end result.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "These token values are examples, not a universal standard. The important thing is to use the distribution your application sees. A RAG system should not be represented by a tiny synthetic prompt simply because it produces a flattering throughput number. Likewise, a creative-writing application may need a longer output distribution than a retrieval question-answering workload.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This is where our earlier routing discussion becomes relevant again. A model router may look efficient when the test assumes a warm cache, but the benefit can disappear if related turns land on different replicas and must rebuild the KV cache. A cache-aware, multi-turn workload should make that assumption visible.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The tools are different because the questions are different",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "llama-bench documentation",
+          "url": "https://github.com/ggml-org/llama.cpp/blob/master/tools/llama-bench/README.md"
+        },
+        {
+          "text": "vLLM benchmark-serving documentation",
+          "url": "https://docs.vllm.ai/en/stable/cli/bench/serve/"
+        },
+        {
+          "text": "GuideLLM documentation",
+          "url": "https://github.com/vllm-project/guidellm"
+        },
+        {
+          "text": "NVIDIA GenAI-Perf documentation",
+          "url": "https://docs.nvidia.com/deeplearning/triton-inference-server/user-guide/docs/perf_benchmark/genai-perf-README.html"
+        },
+        {
+          "text": "MLPerf Inference overview",
+          "url": "https://docs.mlcommons.org/inference/index_gh/"
+        }
+      ],
+      "text": "llama-bench: A local llama.cpp tool for testing prompt processing (pp), text generation (tg), or both. It is useful for CPU-thread, GGUF-quantization, and GPU-offload sweeps. It does not establish production API latency, queueing, routing, continuous batching, or multi-user capacity. Its documented measurements also exclude tokenization and sampling. llama-bench documentation\nvllm bench serve: A client-side benchmark for a running endpoint. It can control input/output lengths, request rate, burstiness, concurrency, warmups, and SLO-aware goodput. This is where I would start when tuning a vLLM deployment. vLLM benchmark-serving documentation\nGuideLLM: An endpoint benchmarker for production-like load profiles, especially rate, concurrency, and sweep tests. I would use it to compare capacity or regressions across configurations and endpoints. GuideLLM documentation\nNVIDIA GenAI-Perf: A token-aware endpoint-testing tool that fits naturally into Triton or TensorRT-LLM environments. It supports synthetic, dataset, and JSONL inputs. NVIDIA GenAI-Perf documentation\nMLPerf Inference: A standardized suite for comparing hardware-and-software systems under prescribed models, data, scenarios, accuracy checks, and rules. It is valuable for published system comparisons, but not a replacement for an application-specific load test. MLPerf Inference overview",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For deployed inference experiments, I would begin with vllm bench serve or GuideLLM. For a local GGUF experiment, I would use llama-bench. I would use MLPerf to understand published system comparisons.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A shareable framework: use an MLPerf-inspired benchmark card",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "MLPerf’s submission guide",
+          "url": "https://docs.mlcommons.org/inference/submission/"
+        }
+      ],
+      "text": "MLPerf is the formal framework for standardized published comparison. Its harness covers query scheduling, logging, latency tracking, accuracy validation, and final metric computation; it also requires a prescribed result structure. MLPerf’s submission guide explains why its results are comparable.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For an application-specific serving benchmark, I would adopt the same discipline in a lighter benchmark card. It is a transparent template that lets somebody else understand, challenge, or reproduce the result.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Every shared benchmark should contain four things:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A one-page benchmark card: the human-readable answer—what was tested, why, and what passed or failed.\nA reproducibility manifest: model revision, image and engine versions, hardware, server configuration, exact command, and seed.\nRaw result artifacts: JSON or CSV with request-level timings where practical; not just a screenshot of one number.\nA small set of plots: offered load versus goodput, P95 TTFT versus offered load, and P95 token cadence versus offered load.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A single benchmark card could look like this:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Run ID and intent: rag-cold-4k-128-v1 — find the highest arrival rate that still meets the chat SLO.\nSystem under test: exact model revision and quantization; server and engine versions; CPU, GPU, memory, driver/runtime; replica and parallelism settings.\nWorkload: RAG prompts with P50 4K and P95 8K input tokens; output capped at 128 tokens; streaming enabled; tokenizer named.\nArrival and cache: open-loop Poisson at 2, 4, 6, and 8 requests per second; maximum concurrency 16; cold cache, then a separate warm-prefix run.\nSLO / pass rule: P95 TTFT at or below 1.5 seconds; P95 inter-token latency at or below 50 ms; error rate below 1%.\nResults: offered and attained request rate; P50/P95/P99 TTFT; P95 inter-token latency; end-to-end latency; output-token throughput; errors; and goodput.\nReproduction: exact server and benchmark commands, configs, seed, duration and warmup, raw JSON/CSV, and chart links.",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "GuideLLM output formats",
+          "url": "https://github.com/vllm-project/guidellm/blob/main/docs/guides/outputs.md"
+        },
+        {
+          "text": "vLLM result options",
+          "url": "https://docs.vllm.ai/en/stable/cli/bench/serve/"
+        },
+        {
+          "text": "GenAI-Perf output options",
+          "url": "https://docs.nvidia.com/deeplearning/triton-inference-server/user-guide/docs/perf_benchmark/genai-perf-README.html"
+        }
+      ],
+      "text": "GuideLLM produces JSON, CSV, and self-contained HTML reports. vLLM can save detailed result JSON and metadata. GenAI-Perf exports CSV/JSON and comparison plots. GuideLLM output formats, vLLM result options, and GenAI-Perf output options",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The most important reporting habit is to separate offered load from attained throughput. If I offer 8 requests per second but the service queues, errors, or misses the SLO, reporting only the resulting tokens/second hides the actual behavior. Goodput is much more honest: it counts work that was completed within the latency requirements that matter.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What I want to test next",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The next hands-on lab should not try to crown one tool the winner. It should use one deployed vLLM endpoint and a reproducible benchmark card to answer a real question.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "I would keep the model and system fixed, then change one variable at a time: offered rate, cache condition, or serving configuration. The result would show exactly which workload, at what load, under what SLO, and with what cache behavior makes a setup the better choice.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That is the kind of benchmarking data I would trust—and want to share.",
+      "type": "paragraph"
+    }
+  ],
+  "images": [],
+  "bodyHash": "f696d36681fad8dbc1bc697c7ffd864449eeaacfb1709ea9290f0c3bdae582b9"
+}

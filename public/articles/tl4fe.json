@@ -1,0 +1,831 @@
+{
+  "id": "tl4fe",
+  "title": "LLM Inference Challenges - Understanding Prefill vs Decode",
+  "author": "Anurag Mohan",
+  "date": "June 2, 2026",
+  "url": "https://www.linkedin.com/pulse/llm-inference-challenges-understanding-prefill-vs-decode-mohan-tl4fe",
+  "blocks": [
+    {
+      "links": [],
+      "text": "Understanding Prefill vs Decode",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "In the previous parts, we explored:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "tensor parallelism\npipeline parallelism\ndata parallelism\ndistributed serving\nGPU communication\nreplicas and routing",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "At this point, the infrastructure picture starts becoming much clearer.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But something important still feels confusing.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Even after building massive GPU clusters:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "why does inference still become difficult?\nwhy do GPUs sometimes remain underutilized?\nwhy is generation much harder than prompt processing?\nand why do modern systems focus so heavily on schedulers and batching?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The answer starts with understanding two runtime phases:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Prefill\nand\nDecode ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "These two phases behave very differently.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "And honestly, this becomes one of the most important mental models in inference systems.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is prefill?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Suppose a user sends:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "\"Explain quantum computing in simple terms\" ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Before the model can generate the first output token, it must first process the entire prompt.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That initial processing phase is called:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Prefill ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "During prefill:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "prompt tokens move through all transformer layers\nattention is computed\nactivations are generated\nKV cache entries are created",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So prefill is essentially:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "building the initial context ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "before generation starts.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why is it called prefill?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Because during this phase, the KV cache gets filled.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Prompt Tokens:\n[T1, T2, T3, T4] ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "During prefill:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "T1 → KV stored\nT2 → KV stored\nT3 → KV stored\nT4 → KV stored ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The cache becomes populated before decoding begins.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That is where the name comes from.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why is prefill highly parallel?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "This is extremely important.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "During prefill:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "all prompt tokens already exist ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "[T1, T2, T3, T4, T5 ...] ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So GPUs can process many computations simultaneously.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This creates:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "large matrix multiplications\nhigh tensor core utilization\nefficient batching\nstrong GPU utilization",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This is why prefill is usually:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "compute heavy ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The GPUs are busy doing large amounts of parallel computation.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What happens after prefill?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Once KV cache exists:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "token generation starts\nthe model begins generating one token at a time",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This phase is called:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Decode ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Token 1\n→ Token 2\n→ Token 3 ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "And this phase behaves VERY differently.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why is decode different?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Because generation is sequential.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The model cannot generate:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "token 2 before\ntoken 1 exists",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So unlike prefill:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "future tokens do not exist yet ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This changes the entire runtime behavior.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why does decode become difficult?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "During decode:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "only one new token is processed at a time\nmatrix multiplications become much smaller\nGPU parallelism drops\nsynchronization overhead becomes more visible",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So decode often becomes:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "memory + latency heavy ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "instead of compute heavy.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This is one of the biggest transitions in inference systems.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How does tensor parallelism behave during prefill?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Suppose one layer is split across 4 GPUs.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "GPU 1 → partial tensor\nGPU 2 → partial tensor\nGPU 3 → partial tensor\nGPU 4 → partial tensor ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "During prefill:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "many tokens are processed together\nGPUs stay busy\nlarge computations happen\ncommunication overhead is relatively small compared to compute",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Tensor parallelism works efficiently here.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What changes during decode?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "During decode:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "tensor parallel GPUs still cooperate\nsynchronization still happens\noutputs still combine",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But now:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "only one token is processed\ncomputation becomes smaller\ncommunication overhead becomes more noticeable",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So decode starts exposing:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "synchronization costs\ncommunication latency\nmemory bottlenecks",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "much more clearly.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How does pipeline parallelism behave during prefill?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Suppose we divide the model like this:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Stage 1 → Layers 1–20\nStage 2 → Layers 21–40\nStage 3 → Layers 41–60\nStage 4 → Layers 61–80 ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "During prefill:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "many prompt tokens flow through the pipeline\nstages continuously receive work\nGPUs remain busy",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Time 1:\nStage 1 → Tokens 1–250\n\nTime 2:\nStage 1 → Tokens 251–500\nStage 2 → Tokens 1–250\n\nTime 3:\nStage 1 → Tokens 501–750\nStage 2 → Tokens 251–500\nStage 3 → Tokens 1–250 ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Eventually:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "all stages stay active\nthe pipeline stays full",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This creates good utilization.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What changes during decode?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Now decode starts.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Instead of processing:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "hundreds of prompt tokens together",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "the system processes:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "ONE token at a time ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Now look at the pipeline carefully.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Decode Pipeline Example",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Time 1",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Stage 1 → working\nStage 2 → idle\nStage 3 → idle\nStage 4 → idle ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Time 2",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Stage 1 → idle\nStage 2 → working\nStage 3 → idle\nStage 4 → idle ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Time 3",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Stage 1 → idle\nStage 2 → idle\nStage 3 → working\nStage 4 → idle ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Time 4",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Stage 1 → idle\nStage 2 → idle\nStage 3 → idle\nStage 4 → working ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Now something important becomes visible.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Most GPUs are waiting most of the time.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This is underutilization.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why does this happen?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Because pipeline parallelism wants:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "a continuous stream of work ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Prefill provides that.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Decode naturally does not.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This creates:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "pipeline bubbles ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "meaning:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "some stages remain empty\nGPUs sit idle\nhardware utilization drops",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Does data parallelism help here?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Yes.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Remember:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "one replica contains the full distributed model\nmultiple replicas exist independently",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Replica 1\nReplica 2\nReplica 3 ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "During decode:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "different users stay attached to different replicas\neach replica maintains its own KV cache\ndecode loops continue independently",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This helps increase overall throughput.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But inside each replica:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "decode still remains sequential",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So the challenge still exists.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why is scheduler design so important then?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Because inference systems try extremely hard to:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "keep GPUs busy\nreduce idle time\ncontinuously refill batches\noverlap decode requests efficiently",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This is why modern systems heavily focus on:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "continuous batching\nrequest schedulers\nKV cache management\npaged attention\nspeculative decoding",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Most of these optimizations exist because:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "decode naturally fights GPU efficiency ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "What is the key mental model?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Prefill:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Large parallel computation\nHigh GPU utilization\nCompute heavy ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Decode:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Sequential token generation\nSmaller workloads\nCommunication + memory sensitive ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "And this difference changes almost everything about inference system design.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is the deeper intuition here?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "At first, inference systems look like:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "GPUs doing matrix multiplications",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But once decode becomes clear, the mental model starts shifting toward:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "distributed runtime scheduling systems ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Because now the challenge is no longer only:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "running the model",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It becomes:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "keeping GPUs utilized\ncoordinating requests efficiently\nmanaging KV cache\nminimizing waiting\nbalancing latency vs throughput",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "And honestly, this is where inference systems start becoming much harder than they initially appear.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What comes next?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Now that we understand:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "prefill\ndecode\nwhy decode becomes sequential\nwhy GPU utilization drops\nwhy batching becomes difficult",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "the next natural question becomes:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How do modern systems\nkeep GPUs busy during decode? ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This leads directly into one of the most important concepts in modern inference systems:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Continuous Batching ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Because continuous batching is essentially an attempt to solve:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "decode inefficiency\nidle GPUs\nand pipeline bubbles",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "And once that clicks, systems like:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "vLLM\npaged attention\nadvanced schedulers",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "start making much more intuitive sense.",
+      "type": "paragraph"
+    }
+  ],
+  "images": [],
+  "bodyHash": "9616b6c6790d1a06fd77847b5cc77cd757387d06e855ed4fa18b1288f8338e5f"
+}

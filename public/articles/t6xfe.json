@@ -1,0 +1,1896 @@
+{
+  "id": "t6xfe",
+  "title": "Understanding KV-Cache-Aware Routing",
+  "author": "Anurag Mohan",
+  "date": "July 23, 2026",
+  "url": "https://www.linkedin.com/pulse/understanding-kv-cache-aware-routing-anurag-mohan-t6xfe",
+  "blocks": [
+    {
+      "links": [],
+      "text": "LLM Inference Challenges (Part 18)",
+      "type": "heading"
+    },
+    {
+      "links": [
+        {
+          "text": "llm-d",
+          "url": "https://www.linkedin.com/pulse/understanding-llm-d-distributed-inference-anurag-mohan-jqjne"
+        }
+      ],
+      "text": "In the previous part, we explored llm-d and how it coordinates distributed inference across model servers, replicas, GPUs, and Kubernetes nodes. We also introduced an important idea:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Once inference becomes distributed,\nthe question is no longer only:\nDo we have enough KV cache?\n\nIt becomes:\nWhere is the useful KV cache,\nand which request should go there?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That question deserves a deeper look because KV-cache-aware routing is one of the ideas that makes routing in LLM inference very different from traditional load balancing. At first, the idea sounds simple:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Find the replica with the matching cache.\nSend the request there.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "But once queue depth, cache eviction, partial matches, memory pressure, and multiple replicas enter the picture, the routing decision becomes much more interesting. This article is my attempt to build that mental model.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why does KV-cache-aware routing need its own article?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Traditional load balancing usually thinks about:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "healthy endpoints\nactive connections\nrequest counts\nCPU utilization\nresponse latency LLM inference needs to consider all of those things. But it may also need to understand:\nwhich prompt prefixes have already been processed\nwhere their KV-cache blocks currently live\nhow much of a new prompt can be reused\nwhether that replica has enough KV-cache capacity\nwhether waiting for that replica is cheaper than recomputing elsewhere So routing is no longer based only on:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Which server is least busy?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "It may also be based on:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Which server has already completed\nthe most useful work for this request?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "First, what is a prompt prefix?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "A prefix is the beginning portion of a prompt. Suppose two requests look like this:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Request A:\n[System Prompt]\n[Company Policies]\n[Product Documentation]\nQuestion: How do I reset my password?\n\nRequest B:\n[System Prompt]\n[Company Policies]\n[Product Documentation]\nQuestion: How do I update my billing address?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The final questions are different. But most of the beginning is identical:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "[System Prompt]\n[Company Policies]\n[Product Documentation]",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That shared beginning is the reusable prefix. Other examples include:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "the same system prompt used for every request\nthe same conversation history in a multi-turn chat\nthe same document queried with different questions\nthe same agent instructions repeated across tool calls\nthe same retrieved context used by several RAG requests",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is prefix caching?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "When an inference engine processes a prompt, it creates KV-cache entries for the prompt tokens. If another request later begins with the same token sequence, the engine may reuse those KV-cache blocks instead of recomputing that shared portion. This is commonly called:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Prefix Caching",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "or:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Automatic Prefix Caching",
+      "type": "code"
+    },
+    {
+      "links": [
+        {
+          "text": "vLLM",
+          "url": "https://docs.vllm.ai/en/latest/features/automatic_prefix_caching/"
+        }
+      ],
+      "text": "vLLM’s Automatic Prefix Caching stores KV-cache blocks from previous requests and allows a later request with the same prefix to skip computation for the shared portion. (vLLM)",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Does prefix caching store the model’s answer?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "No. It does not cache the generated answer. It caches the intermediate key and value tensors produced while processing the prompt. The system is not saying:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "I have seen this question before,\nso I will return the old response.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "It is saying:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "I have already processed these prefix tokens,\nso I do not need to compute them again.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The new request can still:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "contain a different final question\ngenerate a different response\nuse different sampling settings\ncontinue along a different token path",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What does prefix caching actually save?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "It saves prefill computation. Suppose a request contains:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "8000 shared prefix tokens\n+\n100 new tokens",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Without a cache hit:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Process all 8100 tokens",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "With a reusable prefix:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Reuse 8000 tokens\nProcess only the new 100 tokens",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This can reduce:",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "vLLM",
+          "url": "https://docs.vllm.ai/en/latest/features/automatic_prefix_caching/"
+        }
+      ],
+      "text": "prefill work\ntime to first token\naccelerator usage\ncost per request\nrepeated memory traffic But prefix caching does not make the new output tokens generate in parallel. It mainly helps prefill, not decode. vLLM’s documentation specifically notes that Automatic Prefix Caching reduces prompt-processing time but does not reduce the time required to generate new tokens. (vLLM)",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What happens on one inference server?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "With one model server, the flow is easier:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Request A\n  ↓\nvLLM processes shared prefix\n  ↓\nKV-cache blocks remain available\n\nRequest B with same prefix\n  ↓\nvLLM finds matching blocks\n  ↓\nShared prefill is skipped",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The inference engine manages:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "the KV-cache blocks\nblock hashes\ncache lookup\ncache eviction\nreuse during the next request Everything happens inside one engine.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What changes when we add multiple replicas?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Suppose we now have three replicas:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Replica A\nReplica B\nReplica C",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Each replica has:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "its own model weights\nits own scheduler\nits own active batches\nits own GPU memory\nits own local KV cache The caches are not automatically identical. For example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Replica A:\nPrefix X\nPrefix Y\n\nReplica B:\nPrefix Z\n\nReplica C:\nNo reusable prefix",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Now a request arrives containing Prefix X. If it goes to Replica A:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Prefix X can be reused.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "If it goes to Replica B or C:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Prefix X must be recomputed.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The model is the same. The hardware may be the same. But the request can behave very differently depending on which replica receives it.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why can round-robin routing hurt prefix caching?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "A round-robin load balancer might route requests like this:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Request 1 → Replica A\nRequest 2 → Replica B\nRequest 3 → Replica C\nRequest 4 → Replica A",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That works well when requests are:",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "llm-d",
+          "url": "https://llm-d.ai/docs/well-lit-paths/foundations/optimized-baseline"
+        }
+      ],
+      "text": "short\nuniform\nindependent But LLM requests can be long, multi-turn, and highly repetitive. If related requests are scattered across replicas:\nthe same prefix may be processed repeatedly\neach replica builds a separate copy of the cache\nuseful cache locality is lost\ntime to first token may increase\nGPU work is duplicated llm-d’s optimized baseline combines prefix awareness with load awareness because ordinary round-robin policies do not understand these LLM-specific request patterns. (llm-d)",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is KV-cache-aware routing?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "KV-cache-aware routing means selecting a model-server endpoint partly based on which KV-cache blocks it already contains. A simple flow is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "New Request\n  ↓\nExamine Prompt Prefix\n  ↓\nFind Replicas with Matching KV Blocks\n  ↓\nCompare Cache Locality and Current Load\n  ↓\nSelect Endpoint",
+      "type": "code"
+    },
+    {
+      "links": [
+        {
+          "text": "llm-d",
+          "url": "https://llm-d.ai/docs/architecture/advanced/kv-management/prefix-cache-aware-routing"
+        }
+      ],
+      "text": "In llm-d, this intelligence lives in the Router’s Endpoint Picker, or EPP. The goal is to route a request toward a replica where the shared prefix can be reused, while still considering whether that replica is healthy and has enough capacity. (llm-d)",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Does this create one shared KV cache?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Not necessarily. A useful mental model is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Not one giant shared cache.\n\nMany local caches\n+\nknowledge of where blocks live\n+\nrouting decisions based on that knowledge ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "For example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Replica A → Blocks 1, 2, 3, 4\nReplica B → Blocks 1, 2\nReplica C → No matching blocks",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The Router does not need to merge all GPU memory into one memory space. It needs enough information to understand:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Which replica currently has\nthe most useful state?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "What exactly needs to match?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Prefix caching is based on token sequences, not semantic similarity. These prompts may mean almost the same thing:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Explain KV cache.\n\nPlease explain KV cache.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "But they begin with different tokens. So they may not share the same cache blocks. Similarly, small differences can break a prefix match:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "different whitespace\ndifferent system-prompt versions\ndifferent chat templates\nmessages in a different order\ndifferent retrieved documents\ndifferent tokenizer configurations The important rule is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Same meaning\ndoes not guarantee\nsame token prefix.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "How does vLLM represent cached prefixes?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "vLLM divides KV cache into fixed-size blocks. Each full block represents the KV state for a group of tokens. For prefix caching, vLLM uses a hash-based design. A block key incorporates:",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "vLLM",
+          "url": "https://docs.vllm.ai/en/latest/design/prefix_caching/"
+        }
+      ],
+      "text": "the parent block’s hash\nthe tokens in the current block\nadditional identifying values when required Those additional values can include things such as LoRA identifiers, multimodal input hashes, or cache salts used for isolation. Because the parent hash is included, the same token block appearing after a different prefix receives a different identity. vLLM caches full blocks and uses this chained hashing structure to identify reusable prefixes. (vLLM)",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What does chained hashing mean?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Imagine a prompt split into four blocks:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Block 1 → [A B C D]\nBlock 2 → [E F G H]\nBlock 3 → [I J K L]\nBlock 4 → [M N O P]",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Conceptually:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Hash 1\n=\nhash(Block 1)\n\nHash 2\n=\nhash(Hash 1 + Block 2)\n\nHash 3\n=\nhash(Hash 2 + Block 3)\n\nHash 4\n=\nhash(Hash 3 + Block 4)",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This creates a chain. If another prompt starts with the same blocks:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "[A B C D]\n[E F G H]\n[I J K L]",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "then its first three block hashes should match. The engine can reuse those blocks. If the fourth block differs, computation continues from that point.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Can a request have a partial cache hit?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Yes. Suppose a request contains eight prompt blocks:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "[B1][B2][B3][B4][B5][B6][B7][B8]",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Replica A contains:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "[B1][B2][B3][B4][B5][B6]",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Replica B contains:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "[B1][B2]",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Replica C contains:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "No matching blocks",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The approximate match ratios are:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Replica A → 6 / 8 = 75%\nReplica B → 2 / 8 = 25%\nReplica C → 0 / 8 = 0%",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Replica A has the strongest cache affinity. It can reuse six blocks and compute only the remaining suffix.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Does the entire prompt need to match?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "No. A full cache hit is useful, but partial reuse can also save substantial work. For example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "10,000-token prompt\n6000 tokens cached\n4000 tokens uncached",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Reusing 6000 tokens may still be valuable. So the Router is not always asking:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Is this prompt cached?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "It may be asking:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How much of this prompt\nis cached on each endpoint?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Is the match ratio enough?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Not always. Consider these two cases:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Request A:\n90% of 100 tokens cached\n=\n90 cached tokens\n\nRequest B:\n60% of 10,000 tokens cached\n=\n6000 cached tokens",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Request A has the higher percentage. But Request B may avoid much more computation. This is why a routing policy may consider:",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "GitHub",
+          "url": "https://github.com/llm-d/llm-d-router/tree/main/pkg/epp/framework/plugins/scheduling/scorer/prefix"
+        }
+      ],
+      "text": "match ratio\nabsolute matched length The current llm-d prefix-cache scorer supports both the proportion of matched blocks and the absolute number of matched tokens, with configurable weighting between them. (GitHub)",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why not always choose the largest cache match?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Because the replica with the best cache may also be overloaded. Suppose:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Replica A:\n90% prefix match\n20 requests waiting\nHigh KV-cache pressure\n\nReplica B:\n70% prefix match\nNo queue\nPlenty of KV-cache capacity",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Replica A saves more prefill work. But the request may wait a long time before running. Replica B needs more computation. But it may start immediately. The real question becomes:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Is waiting for the best cache hit\ncheaper than recomputing on a less busy replica? ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "What is the Router really trying to minimize?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "A useful conceptual model is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Expected latency\n≈\nqueueing delay\n+\nuncached prefill time\n+\ndecode time",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This is not one universal llm-d formula. It is a way to understand the tradeoff. Cache-aware routing reduces:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "uncached prefill time",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Load-aware routing reduces:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "queueing delay",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The Router needs both.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What load signals can matter?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Useful signals may include:",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "llm-d",
+          "url": "https://llm-d.ai/docs/architecture/core/router/epp/scheduling"
+        }
+      ],
+      "text": "queue depth\nactive requests\ntoken load\nKV-cache utilization\npredicted TTFT\npredicted inter-token latency\nprefix-cache match llm-d’s Router supports modular scorers for queue depth, running requests, token load, KV-cache utilization, latency, and prefix affinity. Its optimized baseline also probes endpoint metrics and combines load awareness with prefix awareness to avoid hotspots. (llm-d)",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How does the Endpoint Picker make a decision?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The llm-d Endpoint Picker follows a general lifecycle:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Filter\n  ↓\nScore\n  ↓\nPick",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Filter",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Remove endpoints that should not handle the request. For example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "unhealthy endpoint\nwrong model\nwrong worker role\ninsufficient SLO headroom\nincompatible LoRA adapter",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Score",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Assign scores to the remaining endpoints. For example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "higher prefix match → better score\nshorter queue → better score\nlower KV-cache utilization → better score\nmore latency headroom → better score",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Pick",
+      "type": "heading"
+    },
+    {
+      "links": [
+        {
+          "text": "llm-d",
+          "url": "https://llm-d.ai/docs/architecture/core/router/epp/scheduling"
+        }
+      ],
+      "text": "Select the final endpoint using the combined scores. The EPP supports multiple weighted scorers, so routing can balance cache reuse against load rather than relying on one signal alone. (llm-d)",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What would a simplified scoring example look like?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Suppose the Router gives equal importance to:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Prefix Cache Score\nLoad Score\nKV Capacity Score",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The candidate scores might look like:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Replica A:\nPrefix = 0.9\nLoad   = 0.2\nKV     = 0.3\n\nReplica B:\nPrefix = 0.7\nLoad   = 0.9\nKV     = 0.8\n\nReplica C:\nPrefix = 0.0\nLoad   = 1.0\nKV     = 1.0",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Replica A has the best cache. Replica C has the most capacity. Replica B may provide the best overall balance. The exact weights depend on:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "workload shape\nlatency targets\nprompt lengths\ntraffic volume\nhardware\ncache behavior There is no universal perfect score.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How does llm-d know what is cached?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "This was one of the most interesting questions for me. It is easy to say:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Route to the replica with the cache.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "But the Router still needs to know:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is cached?\nWhere is it cached?\nHas it been evicted?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "llm-d currently documents two approaches:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Approximate Prefix-Cache Routing\n\nPrecise Prefix-Cache Routing",
+      "type": "code"
+    },
+    {
+      "links": [
+        {
+          "text": "llm-d",
+          "url": "https://llm-d.ai/docs/architecture/advanced/kv-management/prefix-cache-aware-routing"
+        }
+      ],
+      "text": "They solve the same broad problem but obtain cache knowledge differently. (llm-d)",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is approximate prefix-cache routing?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Approximate routing is the lighter approach. The Router does not maintain an exact view reported by every model server. Instead, it builds an estimate based largely on its own routing history. The flow is roughly:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "1. Approximate prompt tokens.\n\n2. Split the prompt into logical blocks.\n\n3. Build rolling prefix hashes.\n\n4. Remember which hashes were routed\n   to which replicas.\n\n5. Assume the selected replica\n   now contains that prefix.\n\n6. Use that history to score\n   future requests.",
+      "type": "code"
+    },
+    {
+      "links": [
+        {
+          "text": "llm-d",
+          "url": "https://llm-d.ai/docs/architecture/advanced/kv-management/prefix-cache-aware-routing"
+        }
+      ],
+      "text": "In llm-d’s approximate path, the EPP estimates token boundaries using character-to-token ratios, builds a rolling hash chain, and stores recent prefix-to-pod associations in a local in-memory LRU index. (llm-d)",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why does approximate routing use characters?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The Router may not contain the model’s tokenizer. But the prompt arrives as text. So the approximate implementation estimates how many characters correspond to a token and uses that estimate to create logical blocks. This makes it lightweight because it does not require:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "a tokenizer service\nexact token IDs\nmodel-server cache events\na live global cache index",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What does the approximate Router actually know?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "It mainly knows:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "I previously sent this prefix\nto Replica A.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "It then assumes:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Replica A probably still has it.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This can work surprisingly well for:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "stable workloads\nrepeated prompts\nlow cache churn\nsimple deployments",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why can the approximate view become wrong?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Because the Router’s history may diverge from the model server’s real memory. For example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Router believes:\nPrefix X → Replica A\n\nBut Replica A:\nevicted Prefix X\ndue to KV-cache pressure",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Other events can also change reality:",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "llm-d",
+          "url": "https://llm-d.ai/docs/architecture/advanced/kv-management/prefix-cache-aware-routing"
+        }
+      ],
+      "text": "pod restart\ncache eviction\nmodel reload\nmemory pressure\na request not completing as expected The approximate Router may still believe the prefix exists until its local history changes. The llm-d documentation describes this as the main limitation of the lightweight approach: the local estimate can diverge from the model server’s actual cache state. (llm-d)",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is precise prefix-cache routing?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Precise routing uses actual token identities and actual cache events from model servers. The flow is closer to:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Prompt\n  ↓\nExact Tokenization\n  ↓\nExact Block Keys\n  ↓\nGlobal KV-Cache Index Lookup\n  ↓\nPer-Replica Match Information\n  ↓\nCache + Load Scoring\n  ↓\nSelected Replica",
+      "type": "code"
+    },
+    {
+      "links": [
+        {
+          "text": "llm-d",
+          "url": "https://llm-d.ai/docs/architecture/advanced/kv-management/prefix-cache-aware-routing"
+        }
+      ],
+      "text": "Instead of assuming where the cache probably exists, the system builds a near-real-time view from the model servers themselves. (llm-d)",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How does precise tokenization work?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The prompt must be converted into the same token IDs that the model server uses. In llm-d’s precise path, a token-producing component can use vLLM’s render endpoint to obtain exact token IDs. This matters because:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Character approximation\nmay not equal\nactual tokenizer output.",
+      "type": "code"
+    },
+    {
+      "links": [
+        {
+          "text": "llm-d",
+          "url": "https://llm-d.ai/docs/architecture/advanced/kv-management/prefix-cache-aware-routing"
+        }
+      ],
+      "text": "Once the exact tokens are known, the system can derive cache-block identities that match the inference engine’s view. (llm-d)",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How does the Router learn about cache changes?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The model servers emit cache events. For example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "BlockStored",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "means a KV-cache block has been created or placed on a cache tier.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "BlockRemoved",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "means a block has been evicted or removed. The KV-Cache Indexer consumes these events and maintains a mapping similar to:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Block Hash 101 → Replica A, Replica B\nBlock Hash 102 → Replica A\nBlock Hash 103 → Replica C",
+      "type": "code"
+    },
+    {
+      "links": [
+        {
+          "text": "GitHub",
+          "url": "https://github.com/llm-d/llm-d/blob/main/docs/architecture/advanced/kv-management/kv-indexer.md"
+        }
+      ],
+      "text": "Current llm-d architecture uses event-driven cache tracking so the indexer can maintain a near-real-time block key → pods view across the inference pool. (GitHub)",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What does the KV-Cache Indexer do?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The Indexer is the observability layer for precise cache-aware routing. It answers questions such as:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Which replica has Block 1?\n\nWhich replica has Blocks 1–6?\n\nWas Block 4 recently evicted?\n\nIs a copy in accelerator memory\nor another cache tier?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The Router’s scorer can consult this index when evaluating candidate endpoints. A useful mental model is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "KV-Cache Indexer\n=\na directory of reusable inference state",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Does the Indexer store the actual KV tensors?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Not necessarily. The index primarily tracks metadata:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "which block\nlives on\nwhich endpoint or cache tier",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The actual KV tensors remain in:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "GPU or accelerator memory\nCPU memory\nan offloaded storage tier The index tells the routing system where the useful state is.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What does a precise routing example look like?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Suppose a new request produces these block keys:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "H1\nH2\nH3\nH4\nH5\nH6",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The global index says:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Replica A:\nH1, H2, H3, H4, H5\n\nReplica B:\nH1, H2, H3\n\nReplica C:\nH1",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The cache matches are:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Replica A → 5 blocks\nReplica B → 3 blocks\nReplica C → 1 block",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The Router then combines that information with load:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Replica A:\n5-block match\nHigh queue\n\nReplica B:\n3-block match\nLow queue\n\nReplica C:\n1-block match\nMedium queue",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The final choice may still be Replica B. Precise routing improves cache knowledge. It does not remove the need for scheduling judgment.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is speculative indexing?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "There can be a small timing gap:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Router selects Replica A\n  ↓\nRequest begins processing\n  ↓\nReplica A creates cache blocks\n  ↓\nKV events reach the Indexer",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "During that gap, another similar request may arrive before the official cache event appears. Speculative indexing lets the routing layer temporarily assume that the newly routed prefix is being created on the selected replica. This reduces the blind spot between:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "routing decision",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "and:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "event-confirmed cache state",
+      "type": "code"
+    },
+    {
+      "links": [
+        {
+          "text": "llm-d",
+          "url": "https://llm-d.ai/docs/architecture/advanced/kv-management/prefix-cache-aware-routing"
+        }
+      ],
+      "text": "llm-d’s precise implementation includes this mechanism to make new state visible sooner. (llm-d)",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Is precise routing free?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "No. It requires more infrastructure:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "exact tokenization\ncache-event publication\nevent transport\na global block index\nadditional Router memory and processing\nmodel-server integration So the tradeoff is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Approximate:\nsimpler and lighter,\nbut less accurate\n\nPrecise:\nmore accurate and observable,\nbut more operationally involved",
+      "type": "code"
+    },
+    {
+      "links": [
+        {
+          "text": "llm-d",
+          "url": "https://llm-d.ai/docs/architecture/advanced/kv-management/prefix-cache-aware-routing"
+        }
+      ],
+      "text": "llm-d positions the approximate approach for lighter or simpler workloads and the precise approach for more complex, high-scale serving where exact cache state is more valuable. (llm-d)",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is the simplest difference between the two?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Approximate routing says:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "I sent this prefix to Replica A,\nso Replica A probably has it.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Precise routing says:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Replica A reported that it stored\nthese exact token blocks,\nand has not reported their removal.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That is the key difference.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What happens after the Router selects a replica?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The request enters the selected inference engine. For example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "llm-d Router\n  ↓\nReplica B selected\n  ↓\nvLLM Scheduler\n  ↓\nAutomatic Prefix Cache Lookup\n  ↓\nMatching KV Blocks Reused\n  ↓\nRemaining Prompt Tokens Prefilled\n  ↓\nDecode Begins",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The llm-d Router does not perform attention computation. It places the request where reuse is most likely. The inference engine performs the actual block lookup and model execution.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Does the Router itself create the cache hit?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "No. The cache hit occurs inside the model server. The Router improves the chance that the request reaches a model server where a hit is possible. So the distinction is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Router\n=\nplaces the request near reusable state\n\nInference Engine\n=\nactually reuses that state",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "How is this different from session affinity?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Session affinity usually means:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Same session ID\n→ same replica",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "KV-cache-aware routing means:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Same or partially shared token prefix\n→ replica with matching blocks",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "These can overlap, but they are not identical. For a multi-turn conversation, session affinity may send the user back to the same replica. That often preserves the conversation cache. But prefix-cache-aware routing can also help across different users. For example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "User A\nUser B\nUser C",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "may all share:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "the same system prompt\nthe same policy document\nthe same coding-agent instructions\nthe same RAG context A cache-aware Router can recognize reusable token prefixes even though the session IDs are different.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Is cache-aware routing semantic routing?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "No. Semantic routing asks:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What does this request mean?\nWhich model or service fits it?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "KV-cache-aware routing asks:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Which endpoint has already processed\nthe exact beginning of this request?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Semantic similarity may send two requests to the same model. But KV-cache reuse requires compatible token prefixes.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How does this relate to model routing?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The complete flow may contain both:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "User\n  ↓\nModel Router\n  ↓\nChoose model or service\n  ↓\nllm-d Router\n  ↓\nChoose best replica\n  ↓\nvLLM Scheduler\n  ↓\nChoose when request runs",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The layers answer different questions:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Model Router:\nWhich model?\n\nllm-d Router:\nWhich serving endpoint?\n\nvLLM Scheduler:\nWhich requests run now?\n\nGPU:\nPerform the computation.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "How does this relate to PagedAttention?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "PagedAttention and KV-cache-aware routing operate at different levels. PagedAttention helps the model server:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "store KV cache in blocks\nallocate memory dynamically\navoid large contiguous allocations\nreuse blocks efficiently",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "KV-cache-aware routing helps the distributed system:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "send requests toward replicas\nthat already contain useful blocks",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The connection is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "PagedAttention\norganizes local KV memory.\n\nPrefix Caching\nreuses local KV blocks.\n\nKV-Cache-Aware Routing\npreserves reuse across replicas.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Can cache-aware routing create hotspots?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Yes. Suppose Replica A contains a very popular system prompt. Thousands of incoming requests share that prefix. A cache-only policy may send all of them to Replica A:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Popular Prefix\n  ↓\nReplica A\n  ↓\nReplica A\n  ↓\nReplica A",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The cache hit rate looks excellent. But:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "the queue grows\nTTFT increases\ndecode batches become overloaded\nother replicas remain underused This is why cache affinity cannot be the only routing signal.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How can the Router balance affinity and distribution?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "A routing strategy can:",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "GitHub",
+          "url": "https://github.com/llm-d/llm-d-router/blob/main/pkg/epp/framework/plugins/scheduling/filter/prefixcacheaffinity/README.md"
+        }
+      ],
+      "text": "use cache match as one weighted score\ncombine it with queue depth and KV utilization\nselect among several cache-compatible endpoints\nbreak cache stickiness when latency becomes too high\noccasionally explore other replicas to seed additional cache copies The current llm-d Router includes a prefix-affinity filter that can preserve cache locality while breaking stickiness when estimated TTFT on cache-heavy endpoints becomes significantly worse. It also supports exploration so cache state does not remain permanently concentrated on one subset of replicas. (GitHub)",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is the deeper tradeoff?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The Router is balancing two opposing goals:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Locality\nvs\nDistribution",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Locality says:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Keep similar requests together\nto maximize cache reuse.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Distribution says:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Spread requests out\nto avoid overloading one replica.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Too much locality creates hotspots. Too much distribution destroys cache reuse. Good routing lives somewhere between them.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What happens when a cache block is evicted?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "KV cache is limited. As new requests enter and active sequences grow, older reusable blocks may be evicted. The state may change like:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Time 1:\nReplica A has Prefix X\n\nTime 2:\nMemory pressure increases\n\nTime 3:\nPrefix X is evicted\n\nTime 4:\nNew request with Prefix X arrives",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "With approximate routing, the Router may still believe Replica A has the prefix. With precise routing, a removal event updates the index. This is one reason actual cache events become valuable in high-churn systems.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Does a high cache hit always mean lower latency?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "No. A high cache hit reduces prefill computation. But end-to-end latency also depends on:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "queueing\nactive decode load\nGPU communication\nKV-cache pressure\noutput length\nnetwork latency\nscheduling overhead A request with a perfect cache hit can still be slow if the selected replica has a long queue. A request with no cache hit can still start quickly on an idle replica. Cache locality is important. It is not the whole system.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Which workloads benefit most?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "KV-cache-aware routing is especially useful for workloads with repeated, long prefixes:",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "vLLM",
+          "url": "https://docs.vllm.ai/en/latest/features/automatic_prefix_caching/"
+        }
+      ],
+      "text": "multi-turn conversations\nlong-document question answering\nshared enterprise system prompts\nRAG workloads with overlapping retrieved context\ncoding agents with repeated repository context\ntool-using agents with growing conversation histories\nbatch jobs using the same instruction template vLLM identifies long-document querying and multi-round conversation as major Automatic Prefix Caching use cases. llm-d’s routing guidance also highlights shared prompts, conversations, agentic loops, and overlapping RAG context as strong candidates for prefix affinity. (vLLM)",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "When does it help less?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "It provides less value when:",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "vLLM",
+          "url": "https://docs.vllm.ai/en/latest/features/automatic_prefix_caching/"
+        }
+      ],
+      "text": "prompts are short\nevery request has a unique prefix\noutput generation dominates total latency\ncache entries are evicted before reuse\nrequest volume is too low to produce repeated prefixes\nthere is only one model-server replica For long-output workloads, decode may dominate the request even when prefill is reduced. For unique prompts, there is simply nothing to reuse. (vLLM)",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why does prompt consistency matter?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Applications can unintentionally destroy cache reuse. For example, suppose every request includes:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Current timestamp: 10:01:01",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "then:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Current timestamp: 10:01:02",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "near the beginning of the prompt. Everything after that point may receive different chained block hashes. Similarly, changing:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "system-prompt wording\nmessage ordering\ndocument ordering\ndynamic metadata placement can reduce prefix reuse. A cache-friendly prompt structure often places:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "stable shared content first\ndynamic request-specific content later",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This allows more leading blocks to remain identical.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What about multi-tenant isolation?",
+      "type": "heading"
+    },
+    {
+      "links": [
+        {
+          "text": "vLLM",
+          "url": "https://docs.vllm.ai/en/latest/design/prefix_caching/"
+        }
+      ],
+      "text": "Two tenants may use identical prompt text. But a platform may not want their cache identities to overlap. vLLM’s block-hash design can include extra values such as cache salts, allowing otherwise identical prefixes to be separated when stronger isolation is required. It can also include LoRA and multimodal identifiers so blocks are not incorrectly reused across incompatible model states. (vLLM) The broader lesson is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Cache identity must represent\nall state that affects the computation.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Text alone may not be enough.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What should we measure?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "For a cache-aware routing experiment, I would track:",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "llm-d",
+          "url": "https://llm-d.ai/docs/architecture/core/router/epp/scheduling"
+        }
+      ],
+      "text": "prefix-cache hit ratio\nmatched blocks or matched tokens\nTTFT\nprefill tokens actually computed\nqueueing time\nper-endpoint queue depth\nactive requests per endpoint\nKV-cache utilization\ncache eviction rate\nrequest distribution across replicas\nRouter scheduling latency\noutput tokens/sec The llm-d EPP exposes metrics for prefix-index hit ratio and matched bytes, along with per-endpoint queue size, average KV-cache utilization, running requests, and scheduling latency. (llm-d)",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why is hit rate alone not enough?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Suppose an experiment shows:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Cache hit rate:\n95%",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That sounds excellent. But if:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Replica A receives 90% of traffic\nand develops a huge queue",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "then user latency may still become worse. A good experiment should compare:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Cache Reuse\n+\nLoad Balance\n+\nUser-Facing Latency",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The goal is not to maximize one metric in isolation. The goal is to improve the whole serving system.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What would a useful experiment look like?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "A simple experiment could compare three routing policies:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Policy 1 — Round Robin",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Ignore cache state.\nSpread requests evenly.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Policy 2 — Cache Only",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Always choose the replica\nwith the strongest prefix match.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Policy 3 — Cache + Load",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Combine prefix match,\nqueue depth,\nand KV-cache utilization.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Then run a workload containing:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "a shared long system prompt\nrepeated multi-turn conversations\nsome completely unique requests Measure:\nTTFT\nthroughput\ncache hit ratio\nqueue imbalance\nGPU utilization\np95 and p99 latency That would make the routing tradeoff visible rather than only theoretical.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is the full request flow now?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The complete mental model looks like this:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "User sends request\n  ↓\nPrompt is parsed\n  ↓\nPrefix blocks are approximated\nor tokenized exactly\n  ↓\nRouter evaluates candidate endpoints\n  ↓\nCache match is calculated\n  ↓\nLoad and memory signals are added\n  ↓\nBest endpoint is selected\n  ↓\nInference engine checks local cache\n  ↓\nMatching KV blocks are reused\n  ↓\nUncached suffix is prefilled\n  ↓\nDecode begins\n  ↓\nNew KV blocks are stored\n  ↓\nCache state is updated",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "What is the most important distinction?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "I would separate the pieces like this:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Automatic Prefix Caching\n=\nCan this engine reuse previous prompt work?\n\nKV-Cache Indexing\n=\nWhere does that reusable work currently exist?\n\nKV-Cache-Aware Routing\n=\nWhich endpoint should receive this request?\n\nLoad-Aware Scheduling\n=\nIs that endpoint still a good choice right now?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "These ideas work together. None of them alone solves the complete distributed routing problem.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is the biggest mental shift?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "In traditional systems, routing often feels like:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Send the request\nto a healthy server\nwith available capacity.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "In LLM inference, routing can become:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Send the request\nto a healthy server\nwith available capacity\nthat also contains the most useful\nintermediate model state.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That extra condition changes a lot. The request is no longer stateless from the routing layer’s point of view. Its prompt history may have already created valuable work somewhere in the cluster. The Router is trying to preserve that work.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is the key intuition?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The simplest summary is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Prefix caching saves repeated prefill work.\n\nKV-cache-aware routing preserves\nthat saving when we add more replicas.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Or:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Without cache-aware routing,\nscale-out can destroy locality.\n\nWith cache-aware routing,\nthe system tries to scale\nwithout throwing useful computation away.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "What comes next?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "KV-cache-aware routing works naturally when one model server performs both:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Prefill\nand\nDecode",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The request reaches the replica. The prefix is reused or computed. Then decode continues on that same server. But what happens when prefill and decode run on different workers? Now the system must:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "choose a prefill worker\nchoose a decode worker\ncreate or find the KV cache\nmove that cache between workers\nkeep the transfer from hurting TTFT ",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That leads naturally to: Understanding Prefill/Decode Disaggregation and KV-Cache Transfer",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Because once prefill and decode are separated, the question is no longer only:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Where is the KV cache?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "It also becomes:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How do we move it\nto the worker that needs it\nwithout losing the performance\nwe were trying to gain?",
+      "type": "code"
+    }
+  ],
+  "images": [],
+  "bodyHash": "f2f595234a7aa6b0610c9627d2b23ead8d676b420f4aa5ba37fca1f55bd29d13"
+}

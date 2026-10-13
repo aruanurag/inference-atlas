@@ -1,0 +1,631 @@
+{
+  "id": "0y6oe",
+  "title": "LLM Inference Learning Series: Running a Local LLM Server Before Moving to GPUs",
+  "author": "Anurag Mohan",
+  "date": "June 25, 2026",
+  "url": "https://www.linkedin.com/pulse/llm-inference-learning-series-running-local-server-before-mohan-0y6oe",
+  "blocks": [
+    {
+      "links": [],
+      "text": "Lab 1 — Running a Local LLM Server ",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "In the previous articles of this series, I talked about core LLM inference concepts: latency, throughput, TTFT, ITL, batching, concurrency, prompt processing, decode cost, and system utilization.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Now it is time to make those ideas measurable.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This is the first hands-on lab in the series, and I intentionally started local.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For this lab, I used a Mac setup with llama.cpp. The lab is designed for Apple Silicon, but the same learning pattern can run on CPU-only setups as well. It may be slower, and your numbers will be different, but the concepts remain the same.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The goal of this first lab is not to build the fastest inference server. The goal is to understand what actually happens when we run a local model, send real requests, and measure the behavior.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "You can follow the full lab here:",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "https://github.com/aruanurag/llm-inference-lab/tree/main/labs/01-local-llm-serving-apple-silicon",
+          "url": "https://github.com/aruanurag/llm-inference-lab/tree/main/labs/01-local-llm-serving-apple-silicon"
+        }
+      ],
+      "text": "GitHub Lab: https://github.com/aruanurag/llm-inference-lab/tree/main/labs/01-local-llm-serving-apple-silicon",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why start local?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Before moving to vLLM, cloud GPUs, managed inference endpoints, Kubernetes, autoscaling, and cost optimization, I wanted a simple baseline where the moving parts are visible.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This first lab uses:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A local machine.\nA small quantized GGUF model.\nllama.cpp as the runtime.\nAn OpenAI-compatible HTTP endpoint.\nA benchmark script to measure inference metrics.\nSimple system tools to observe CPU, memory, and GPU activity.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This gives us a controlled starting point. Later in the series, I will move to vLLM and cloud environments where GPU access is easier and more cost-efficient. I may also start with simple CPU-based cloud runs before moving to GPU, just to keep the comparisons clean.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Runtime choice: llama.cpp",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "For Lab 1, I used llama.cpp.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It works well on Apple Silicon.\nIt supports Metal acceleration.\nIt runs quantized GGUF models.\nIt exposes an OpenAI-compatible HTTP API.\nIt is simple enough for a first reproducible lab.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Once the server is running, requests go to:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "http://127.0.0.1:8080/v1/chat/completions",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That is useful because the client-side benchmarking flow can stay familiar even when the backend changes later. Today it is llama.cpp; in future labs, it can be vLLM or a cloud-hosted inference endpoint.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Model choice: start small",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "For the first run, I used:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Qwen2.5 1.5B Instruct, Q4_K_M",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This is not about using the smartest model. It is about using a model that starts reliably, fits comfortably, and lets us focus on inference behavior.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Good first model choices for this lab include:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Qwen2.5 1.5B Instruct GGUF, Q4 or Q5.\nLlama 3.2 1B or 3B Instruct GGUF, Q4 or Q5.\nPhi-3 Mini GGUF, Q4, if memory allows.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The first rule of inference labs: make the first experiment reproducible before making it impressive.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What this lab measures",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "This lab focuses on the same metrics we discussed in the earlier inference articles.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Core latency metrics:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "TTFT: time to first token.\nApproximate ITL: time between streamed output chunks.\nEnd-to-end latency: total time from request start to completed response.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Throughput metrics:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Output tokens per second.\nRequests per second.\nApproximate total tokens per second.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "System behavior:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Startup time.\nCPU usage.\nMemory usage.\nGPU / Metal activity.\nConcurrency level.\nBatch size.\nMicro-batch size.\np50, p95, and p99 latency.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "These metrics will continue to matter as the labs move from local serving to GPU-backed serving.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Lab flow",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The lab follows a simple sequence:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Set up llama.cpp.\nDownload a small GGUF model.\nStart a local llama-server.\nVerify the server health endpoint.\nSend one OpenAI-compatible chat request.\nRun benchmark experiments.\nObserve CPU, memory, and GPU behavior.\nChange batching settings.\nCollect and compare results.\nVisualize the benchmark outputs.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This is the basic habit I want to build in the series: change one thing, measure again, and compare.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Experiment 1: Single request, short prompt, short output",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The first experiment sends one short prompt and asks for a short response.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Explain KV cache in two sentences.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This establishes the baseline.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The main question is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How long does the server take to produce the first token?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This is where TTFT becomes real. It is no longer just a definition. You can actually see the delay before the first streamed chunk arrives.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This matters because users often judge responsiveness by the time it takes for the first token to appear, not only by the total completion time.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Experiment 2: Long prompt, short output",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The second experiment keeps the output short but increases the prompt length.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This helps isolate prefill cost.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "In transformer inference, the model has to process the input prompt before it can generate the next token. So longer prompts usually increase the amount of work before generation starts.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The question here is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Does TTFT increase when the prompt gets longer?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This is especially important for real-world applications like:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "RAG systems with retrieved documents.\nChat applications with long conversation history.\nAgents with tool outputs.\nCode assistants with large context.\nEnterprise assistants with policy, ticket, or document context.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Even if the final answer is short, the prompt can be long. That means the user may still experience high TTFT.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Experiment 3: Short prompt, long output",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The third experiment does the opposite.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The prompt is short, but the output length is increased.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Write a compact tutorial on continuous batching.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Now the goal is to observe decode cost.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The question becomes:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Does end-to-end latency increase mostly because more output tokens are generated?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This is why max token settings matter so much in production. They are not just safety limits. They directly affect latency, capacity, and cost.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Two requests can have similar TTFT but very different end-to-end latency if one generates 50 tokens and the other generates 500.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Experiment 4: Multiple concurrent requests",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "After single-request testing, the lab adds concurrency.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "concurrency = 4\nrequests = 12",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Now we are no longer testing only one request. We are testing serving behavior under load.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The important questions are:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Does throughput improve?\nWhat happens to p50 latency?\nWhat happens to p95 latency?\nDoes approximate ITL get worse?\nDoes the server remain stable?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This is where inference tradeoffs become visible. A system may produce better throughput with concurrency, but tail latency can get worse because requests are competing for the same compute resources.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That tradeoff will become even more important in later labs with vLLM, continuous batching, and GPU-backed serving.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Experiment 5: Batch size and micro-batch size",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The final experiment changes server-side batching knobs in llama.cpp.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The two knobs are:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "BATCH_SIZE: logical batch size. This affects how much prompt work the server tries to process together.\nUBATCH_SIZE: physical micro-batch size. This controls how that work is split into smaller chunks.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The lab compares a conservative setting:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "BATCH_SIZE=256\nUBATCH_SIZE=64",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "with a larger setting:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "BATCH_SIZE=1024\nUBATCH_SIZE=256",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The benchmark stays the same. Only the server configuration changes.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The questions are:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Did TTFT improve or get worse?\nDid p95 latency improve or get worse?\nDid throughput improve?\nDid memory usage change?\nDid the server become unstable?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This is the important lesson: there is no universal best batch size. The right value depends on model size, context size, memory, hardware, runtime, and concurrency.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Guessing is not enough. You have to measure.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "CPU, GPU, and Metal observation",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Another part of the lab is watching the machine while inference is running.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "On macOS, I used tools like:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "top\nps\nActivity Monitor\npowermetrics",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The goal is not perfect profiling yet. The goal is to connect inference metrics with system behavior.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Things to observe:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Is CPU usage high?\nHow much memory is the server using?\nDoes Activity Monitor show GPU activity?\nDo startup logs mention Metal?\nWhat happens with CPU-only mode?\nWhat changes when Metal offload is enabled?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "In this lab, GPU_LAYERS controls offload behavior:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "GPU_LAYERS=0      -> CPU-only\nGPU_LAYERS=auto   -> let llama.cpp decide Metal offload\nGPU_LAYERS=all    -> try to offload all possible layers",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This habit will matter even more later in cloud GPU labs. Having a GPU does not automatically mean the system is efficient. We still need to understand utilization, memory pressure, batching behavior, and latency.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Failure is also a valid result",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The lab includes a place to record failures.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "If something fails, record:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Exact command.\nExact error.\nMachine type.\nModel file.\nWhat you tried next.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This is useful because inference work often starts with constraints:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This model does not fit.\nThis quantization is not stable.\nThis runtime setting does not work on this machine.\nThis batch size causes memory pressure.\nThis offload mode does not behave as expected.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A good inference experiment does not only collect successful benchmark numbers. It also collects limits.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why this lab matters",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "This first lab is small by design.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But it creates the foundation for everything that comes next.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "From here, we can change one layer at a time:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Move from llama.cpp to vLLM.\nMove from local CPU or Metal acceleration to cloud GPU.\nCompare prompt-heavy workloads with decode-heavy workloads.\nStudy continuous batching more directly.\nObserve KV cache behavior.\nExplore concurrency limits.\nCompare cost per request.\nCompare latency under different serving configurations.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The infrastructure will become more advanced, but the measurement mindset will stay the same:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Start with a question.\nRun a controlled experiment.\nMeasure TTFT, ITL, latency, throughput, and utilization.\nChange one thing.\nMeasure again.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That is how inference stops being a black box.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Final thought",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "It is tempting to start LLM inference learning with the biggest model and the fastest GPU available.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But for learning, that is not always the best first step.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A small local lab can teach the fundamentals clearly:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "You see the server start.\nYou see the model load.\nYou send the request.\nYou watch the first token.\nYou increase the prompt.\nYou increase the output.\nYou add concurrency.\nYou change batching.\nYou observe CPU, memory, and GPU behavior.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "And suddenly, the metrics from earlier articles are no longer theoretical. They are measurements from a real system.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That is the goal of Lab 1:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Start local. Measure carefully. Build intuition. Then scale.",
+      "type": "paragraph"
+    }
+  ],
+  "images": [],
+  "bodyHash": "b23e559e12cff04fce68a991e624aaff49b11f44581c6ad713bad71b0b516b5e"
+}

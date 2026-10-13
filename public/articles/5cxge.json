@@ -1,0 +1,885 @@
+{
+  "id": "5cxge",
+  "title": "Understanding Jev: What Changes When AI Returns Decisions Instead of Text?",
+  "author": "Anurag Mohan",
+  "date": "October 5, 2026",
+  "url": "https://www.linkedin.com/pulse/understanding-jev-what-changes-when-ai-returns-decisions-anurag-mohan-5cxge",
+  "blocks": [
+    {
+      "links": [],
+      "text": "As I have been exploring inference, model routing, and agentic workflows, I have started hearing more about Jev.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The timing felt relevant. In my recent article on agentic inference, I looked at how a workflow can contain both short decision calls and longer calls for reasoning or generation. Jev made me curious about that first category. ",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "My first reaction was: Is this another small LLM? If it returns probabilities instead of sentences, where does its intelligence come from? And if I still have to provide the context and define the choices, what is it actually doing?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This article follows the questions that helped me understand it, with examples showing what goes in, what comes out, and what the surrounding application does next.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What exactly is Jev?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Jev is a model from TypeSafe AI that evaluates information and returns structured decisions rather than generating free-form text.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "You provide the context, ask focused questions, and define the possible answers. Jev returns values your software can use directly: a choice, a score, or the estimated probability that the answer to a yes/no question is “yes.”",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "TypeSafe AI",
+          "url": "https://docs.typesafe.ai/concepts/system-one"
+        }
+      ],
+      "text": "TypeSafe calls this a System One model—a model designed for fast, focused judgments inside software. TypeSafe AI",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The basic interaction is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "State + questions → structured answers → application logic",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So, is it just a small LLM that returns JSON?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "That is a useful starting comparison, but it misses the intended distinction.",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "TypeSafe AI",
+          "url": "https://typesafe.ai/blog/introducing-system-one-models-and-jev"
+        }
+      ],
+      "text": "TypeSafe describes Jev as using a new model architecture, a parallel sampler, and training focused on calibrated decisions. It is not presenting Jev as a chat model with an instruction saying, “Only return JSON.” TypeSafe AI",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "OpenAI Developers",
+          "url": "https://developers.openai.com/api/docs/guides/structured-outputs"
+        }
+      ],
+      "text": "However, structured output alone is not unique to Jev. Generative LLMs can also produce responses constrained to a defined schema. OpenAI Developers",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The meaningful comparison is therefore not whether the response contains curly brackets. It is whether Jev produces useful judgments at the quality, calibration, latency, and cost our workflow needs.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Then where does the intelligence come from? Has it still learned from data?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Yes. The instructions we send are not its entire source of intelligence.",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "TypeSafe AI",
+          "url": "https://docs.typesafe.ai/introduction/machine-learning-primer"
+        }
+      ],
+      "text": "TypeSafe’s AI primer describes Reinforcement Learning for Calibrated Decisions, or RLCD, as a training path for adapting pretrained language models toward decisions and probabilities rather than conversational responses. So it would also be misleading to describe Jev as completely unrelated to language models. TypeSafe AI",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "TypeSafe AI",
+          "url": "https://docs.typesafe.ai/models"
+        }
+      ],
+      "text": "For our application, we do not start by training Jev from scratch. TypeSafe currently says the same weights serve every account, without customer-specific fine-tuning or LoRA adaptation. We shape its behavior through the evidence, instructions, and criteria we provide. TypeSafe AI",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But if I give it the choices and criteria, am I not giving it the answer?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "We are defining what the answer should mean, not necessarily supplying the answer.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For example, we might define a complex coding task as one involving concurrency, data consistency, or architectural changes.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That definition does not tell Jev whether a particular user request belongs in that category. The model still has to interpret the request against those criteria.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That interpretation is the intended learned contribution. Our code decides what happens afterward.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What do I actually send? Is the “state” basically a system prompt?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Not exactly. State is the material Jev should evaluate.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It can include the incoming request, relevant records, conversation history, reference material, or a policy. Some information stays stable across calls; some changes with every request.",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "TypeSafe AI",
+          "url": "https://docs.typesafe.ai/concepts/state"
+        }
+      ],
+      "text": "The question goes in instructions. The answer definitions go in criteria, where the question type requires them. Jev accepts state as a string or structured JSON. TypeSafe AI",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The distinction is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "State: What information should the model inspect?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Instructions: What judgment should it make?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Criteria: What do the possible answers mean?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Can you show me what a typical call looks like?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Suppose we want to classify a request before choosing a model.",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "TypeSafe AI",
+          "url": "https://docs.typesafe.ai/api"
+        }
+      ],
+      "text": "The request examples below follow TypeSafe’s documented API format. All output values are hypothetical—not results from live tests. Response excerpts show selected fields rather than the complete response. TypeSafe AI",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Input to Jev:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "{\n  \"model\": \"jev-latest\",\n  \"state\": {\n    \"user_request\": \"Debug a race condition in a shared cache and propose a fix that preserves data consistency.\"\n  },\n  \"questions\": {\n    \"task_category\": {\n      \"type\": \"choice\",\n      \"instructions\": \"Which category best describes `user_request`?\",\n      \"criteria\": {\n        \"simple_text\": \"Straightforward rewriting or summarization.\",\n        \"complex_code\": \"Coding involving concurrency, consistency, or architectural changes.\",\n        \"other\": \"The request does not fit either category.\"\n      }\n    }\n  }\n}",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Illustrative output excerpt:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "{\n  \"answers\": {\n    \"task_category\": {\n      \"type\": \"choice\",\n      \"choice\": \"complex_code\",\n      \"probabilities\": {\n        \"simple_text\": 0.02,\n        \"complex_code\": 0.95,\n        \"other\": 0.03\n      }\n    }\n  }\n}",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Now the separation becomes visible.",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "TypeSafe AI",
+          "url": "https://docs.typesafe.ai/primitives/choice"
+        }
+      ],
+      "text": "We supplied the request and defined the categories. Jev supplied an estimated distribution across them. A Choice answer selects the highest-probability option and also includes a separate confidence field in the full response. TypeSafe AI",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Our router would still need its own model inventory, capability checks, cost constraints, and routing policy. This answer does not prove which model will solve the task best.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Are all Jev answers choices like this?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "No. Jev exposes three question types.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Choice selects from options we define, as in the example above.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Noul answers a yes/no question with the estimated probability of “yes.” For example, “Does this message explicitly request a refund?” might return noul: 0.95.",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "TypeSafe AI",
+          "url": "https://docs.typesafe.ai/primitives"
+        }
+      ],
+      "text": "Score evaluates content against ordered levels. For example, we could define levels as “cosmetic issue,” “degraded feature,” and “blocking failure.” The result includes a score, probabilities across the levels, a legend, and confidence. A score can fall between levels; it is not an exact measurement of a physical quantity. TypeSafe AI",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "TypeSafe AI",
+          "url": "https://docs.typesafe.ai/primitives"
+        }
+      ],
+      "text": "Several questions can share one state. They are evaluated independently: one answer does not automatically become evidence for another question in that same call. TypeSafe AI",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Does a probability of 0.8 mean the answer is definitely trustworthy?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "No. It is still a model estimate.",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "TypeSafe AI",
+          "url": "https://docs.typesafe.ai/introduction/machine-learning-primer"
+        }
+      ],
+      "text": "For a well-calibrated model, outcomes assigned roughly 80% probability should occur roughly 80% of the time across many comparable predictions. That is not a guarantee about one answer. We still need to test calibration on our own workload. TypeSafe AI",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "TypeSafe AI",
+          "url": "https://docs.typesafe.ai/confidence"
+        }
+      ],
+      "text": "Jev’s separate confidence field for Choice and Score summarizes how concentrated the answer distribution is. It is not an independent verification of correctness. Noul does not have that additional confidence field. TypeSafe AI",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A correctly structured answer can still be a wrong answer.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Okay, how would I use this around a web application firewall?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Consider an application that investigates suspicious login activity.",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "Cloudflare Docs",
+          "url": "https://developers.cloudflare.com/ai/models/typesafe/jev/"
+        }
+      ],
+      "text": "Cloudflare documents access to Jev through its AI interface. Here, we are designing a hypothetical application-level risk workflow—not describing Cloudflare’s internal WAF implementation. Cloudflare Docs",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "Cloudflare Docs",
+          "url": "https://developers.cloudflare.com/waf/feature-interoperability/"
+        }
+      ],
+      "text": "We would preserve existing security controls first. Cloudflare already has separate protections involving DDoS mitigation, custom rules, rate limiting, and managed rules. Cloudflare Docs",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "I would initially use Jev to evaluate selected events from that environment, rather than put a model call in the path of every request.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What would the state and questions look like?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Our application would collect a compact, sanitized evidence package.",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "TypeSafe AI",
+          "url": "https://docs.typesafe.ai/model-jaggedness/jev-1.13"
+        }
+      ],
+      "text": "Monitoring code would calculate request counts and baseline comparisons. Jev would interpret the resulting patterns alongside relevant operational context. TypeSafe specifically recommends keeping arithmetic in code. TypeSafe AI",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Input to Jev:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "{\n  \"model\": \"jev-latest\",\n  \"state\": {\n    \"traffic_summary\": {\n      \"endpoint\": \"/login\",\n      \"window\": \"Last 60 seconds\",\n      \"attempts\": 120,\n      \"distinct_accounts\": 40,\n      \"failed_attempts\": 116,\n      \"baseline_assessment\": \"Far above normal, as calculated by monitoring code.\",\n      \"pattern\": \"Repeated request structures across rotating network addresses.\"\n    },\n    \"operational_notes\": \"A mobile client launched today. Support reports repeated login attempts after sessions expire.\"\n  },\n  \"questions\": {\n    \"automated_abuse\": {\n      \"type\": \"noul\",\n      \"instructions\": \"Does `traffic_summary` suggest coordinated automated login abuse, considering `operational_notes`?\"\n    },\n    \"benign_explanation\": {\n      \"type\": \"noul\",\n      \"instructions\": \"Do `operational_notes` provide a plausible benign explanation for the activity in `traffic_summary`?\"\n    }\n  }\n}",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "We would not include passwords, session cookies, or other secrets in this evidence package.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Notice that we are not asking, “Should I block this IP?” We are asking two narrower questions about the available evidence.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What would come back?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Illustrative output excerpt:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "{\n  \"answers\": {\n    \"automated_abuse\": {\n      \"type\": \"noul\",\n      \"noul\": 0.87\n    },\n    \"benign_explanation\": {\n      \"type\": \"noul\",\n      \"noul\": 0.62\n    }\n  }\n}",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "These answers can coexist. The traffic pattern can look suspicious while an operational issue remains a plausible explanation.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The values do not need to add up to one: they answer different questions, not mutually exclusive alternatives.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Also, “a benign explanation is plausible” does not mean that explanation has been confirmed.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Would the application block the traffic because the first number is high?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Not automatically.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Our policy would combine those estimates with independent security signals, endpoint sensitivity, existing restrictions, and the consequences of a false positive.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For this example, the policy might produce:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Application output—not Jev output:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "{\n  \"action\": \"send_for_security_review\",\n  \"preserve_existing_controls\": true,\n  \"create_permanent_ip_block\": false,\n  \"reason_code\": \"suspicious_pattern_with_possible_client_issue\"\n}",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The reason code comes from our application’s policy. It is not an explanation generated by Jev.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Before enabling enforcement, I would run this in shadow mode: record the judgments without letting them change traffic handling, then compare them with reviewed outcomes.",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "TypeSafe AI",
+          "url": "https://docs.typesafe.ai/model-jaggedness/jev-1.13"
+        }
+      ],
+      "text": "That matters because TypeSafe warns that adversarial content can influence Jev’s answers. Separating trusted operational notes from attacker-controlled data helps organize the evidence, but does not turn the model into a trusted security boundary. TypeSafe AI",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Does a larger LLM need to run after Jev?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "No. Ordinary application code can finish this workflow.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Existing protections → selected events → evidence collection → Jev → policy checks → action or review → outcome logging",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A generative LLM would be optional. We could use it to prepare an analyst-facing incident summary using the original evidence, Jev’s estimates, and the action taken.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Some cases might not need Jev either. In this design, I would keep a deterministic rule or specialist detector wherever it already solves the problem reliably.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How would the same idea work in a financial analysis application?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Let us build a research and scenario-analysis tool, rather than an autonomous financial adviser.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The user supplies a company and a time horizon. Our application retrieves the relevant filings, financial statements, market data, and guidance, preserving source identifiers and timestamps.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Then it selects the evidence needed for each judgment. We would not send only a ticker and expect that to substitute for current information.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For this example, the company, excerpts, and numbers are fictional.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What would the input look like?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Input to Jev:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "{\n  \"model\": \"jev-latest\",\n  \"state\": {\n    \"company\": \"Fictional Company\",\n    \"analysis_horizon\": \"12 months\",\n    \"as_of\": \"2026-09-25\",\n    \"filing_excerpt\": \"Reported profit includes a gain from selling a business. This transaction is not expected to recur.\",\n    \"guidance_excerpt\": \"Our backlog has grown, but customers are taking longer to approve purchases.\"\n  },\n  \"questions\": {\n    \"non_recurring_profit\": {\n      \"type\": \"noul\",\n      \"instructions\": \"Does `filing_excerpt` describe a non-recurring contribution to reported profit?\"\n    },\n    \"improving_demand\": {\n      \"type\": \"noul\",\n      \"instructions\": \"Does `guidance_excerpt` indicate improving customer demand?\"\n    },\n    \"purchase_delays\": {\n      \"type\": \"noul\",\n      \"instructions\": \"Does `guidance_excerpt` describe delays in customer purchasing decisions?\"\n    }\n  }\n}",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This state is intentionally small. The application can retain a much larger research package without sending all of it to every judgment call.",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "TypeSafe AI",
+          "url": "https://docs.typesafe.ai/concepts/how-to-build-with-system-one"
+        }
+      ],
+      "text": "TypeSafe’s guidance recommends retrieving relevant evidence, asking focused questions, and keeping the surrounding workflow in code. TypeSafe AI",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What would Jev return, and what would those numbers mean?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Illustrative output excerpt:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "{\n  \"answers\": {\n    \"non_recurring_profit\": {\n      \"type\": \"noul\",\n      \"noul\": 0.95\n    },\n    \"improving_demand\": {\n      \"type\": \"noul\",\n      \"noul\": 0.72\n    },\n    \"purchase_delays\": {\n      \"type\": \"noul\",\n      \"noul\": 0.84\n    }\n  }\n}",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Our application now has structured judgments about the disclosures.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The first could trigger a review of earnings assumptions. The other two could flag competing considerations: a growing backlog, but slower purchasing decisions.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "These are interpretations of supplied evidence—not probabilities that the share price will reach a particular target.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Then how do we get from those judgments to price scenarios?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "We need an explicit financial model and a review of its assumptions.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For a simplified example, we choose:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Scenario price = assumed future earnings per share × assumed price-to-earnings multiple",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Jev’s output could trigger an analyst to review whether earnings include a non-recurring gain. But Jev’s 0.95 does not tell us what future earnings should be.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "After that review, suppose the analyst approves these hypothetical assumptions.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Input to our valuation code—not to Jev:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "{\n  \"downside\": {\n    \"future_eps\": 3.00,\n    \"pe_multiple\": 20\n  },\n  \"base\": {\n    \"future_eps\": 4.00,\n    \"pe_multiple\": 25\n  },\n  \"upside\": {\n    \"future_eps\": 5.00,\n    \"pe_multiple\": 30\n  }\n}",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Our code performs the multiplications.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Output from the valuation code:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "{\n  \"scenario_prices_usd\": {\n    \"downside\": 60.00,\n    \"base\": 100.00,\n    \"upside\": 150.00\n  }\n}",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "For the base case, that is simply:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "$4 earnings per share × 25 = $100",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "Investor",
+          "url": "https://www.investor.gov/introduction-investing/general-resources/news-alerts/alerts-bulletins/investor-alerts/investor-56"
+        }
+      ],
+      "text": "The calculation is exact under the assumptions. The assumptions themselves remain uncertain—a limitation that also applies to automated investment tools more broadly. Investor",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Could Jev also give us the probabilities for those price scenarios?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "We could formulate that question, but we should not assume its answer would be a validated financial forecast.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "“Does this disclosure suggest improving demand?” and “Will this stock reach $150 in twelve months?” are different prediction problems.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For a basic scenario tool, we could instead use explicitly stated analyst weights.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Additional input to our calculation code:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "{\n  \"scenario_weights\": {\n    \"downside\": 0.25,\n    \"base\": 0.50,\n    \"upside\": 0.25\n  },\n  \"weight_source\": \"Hypothetical analyst assumptions\"\n}",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The calculation becomes:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "0.25 × $60 + 0.50 × $100 + 0.25 × $150 = $102.50",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That is a weighted scenario value under those assumptions—not a validated expected future price.",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "TypeSafe AI",
+          "url": "https://docs.typesafe.ai/cookbooks/autoresearch_feature_discovery"
+        }
+      ],
+      "text": "For a more advanced design, we could test Jev’s signals as inputs to a separate forecasting model trained on historical outcomes. TypeSafe documents the general pattern of using its answers as features for a downstream statistical model, but that is not evidence of successful stock-price prediction. TypeSafe AI",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Where would a generative LLM fit, and what would we send it?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "We could use a generative LLM to explain the completed analysis.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It should receive the original evidence and the approved assumptions—not only Jev’s probabilities. Otherwise, it would be explaining numbers without the information behind them.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Example instruction to the generative LLM:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Write a research summary using the supplied filing excerpts, Jev estimates, analyst assumptions, and calculation results. Distinguish reported facts from model judgments and assumptions. Do not treat Jev’s disclosure estimates as probabilities of future stock prices. Do not invent an explanation of Jev’s internal reasoning.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Context supplied with that instruction:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The filing and guidance excerpts from the earlier state; Jev’s three estimates; the approved earnings and valuation assumptions; the $60, $100, and $150 scenario values; and the analyst-weighted value of $102.50.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Illustrative generated explanation:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Reported profit includes a non-recurring business-sale gain, so the earnings assumptions require review rather than simply carrying reported profit forward. Management describes a growing backlog alongside slower purchasing approvals.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The generative model is communicating the analysis. Our code performed the calculations. Jev supplied focused judgments about the disclosures.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What does the full financial workflow look like?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Company and horizon → sourced data → focused Jev judgments → assumption review → valuation code → optional LLM explanation → reviewed report",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Different downstream components have different jobs.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A forecasting model would estimate outcomes. Valuation code applies formulas. A generative LLM can support broader analysis and communication.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "None is automatically required just because Jev produced an answer.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What would I measure before adopting either design?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "For the security workflow, I would measure missed attacks, false positives, added latency, and how often the system needs human review. I would also test misleading and adversarial inputs.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For the financial workflow, I would check whether Jev’s judgments agree with reviewed disclosures and improve the process beyond a simpler baseline. Any forecasting extension would need testing on later, unseen periods using only information available at the prediction time.",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "TypeSafe AI",
+          "url": "https://docs.typesafe.ai/models"
+        }
+      ],
+      "text": "For both, I would define timeout behavior and record the model and question versions. The examples use jev-latest for readability, but TypeSafe notes that aliases can move. Once thresholds are tuned, pinning a model version makes changes easier to evaluate deliberately. TypeSafe AI",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What changed in my understanding?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "I started by thinking Jev might be an LLM that simply returns percentages.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The examples helped me separate the pieces:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The state supplies evidence. The question defines the judgment. Jev returns an estimate. The surrounding system decides how to use it.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Jev does not remove the need for data pipelines, domain knowledge, calculations, validation, or policy.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It gives us another component to evaluate at a specific point in that system.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Are there open and local alternatives to explore?",
+      "type": "heading"
+    },
+    {
+      "links": [
+        {
+          "text": "Hugging Face.",
+          "url": "https://huggingface.co/convaiinnovations/laya"
+        },
+        {
+          "text": "GitHub",
+          "url": "https://github.com/edgelesssys/privatemode-decisions"
+        }
+      ],
+      "text": "Projects such as Laya, OneJev, Decider, Winnow, and the Apache-licensed Nimble releases offer ways to explore Jev-like decisions locally, using different architectures and training approaches Hugging Face. Privatemode Decisions takes another route: adapting an existing model such as GLM-5.3-Flash at inference time, without additional training. GitHub",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For me, that opens up the next question: Now that I understand the idea, which approach actually fits the system I want to build?",
+      "type": "paragraph"
+    }
+  ],
+  "images": [],
+  "bodyHash": "93772efa135db3c48f7d3471517911fb1b13b2fc4c6f8cfcac7dbe5f94a24ba6"
+}

@@ -1,0 +1,511 @@
+{
+  "id": "lcdee",
+  "title": "Understanding KV Caching in LLM Inference (A Practical, Intuitive Guide)",
+  "author": "Anurag Mohan",
+  "date": "April 29, 2026",
+  "url": "https://www.linkedin.com/pulse/understanding-kv-caching-llm-inference-practical-intuitive-mohan-lcdee",
+  "blocks": [
+    {
+      "links": [],
+      "text": "Let’s build an intuition for KV caching step by step, starting from the core problem and gradually arriving at why caching is necessary—and what tradeoffs it introduces.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why Computation Becomes Expensive Without Caching",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Consider a simple input:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "\"The cat sat\"",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The model processes this and generates the next word:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "\"on\"",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Now the input becomes:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "\"The cat sat on\"",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Here is the key issue:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Without any optimization, the model recomputes everything from scratch at every step.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That means:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It reprocesses \"The\"\nIt reprocesses \"cat\"\nIt reprocesses \"sat\"\nThen processes \"on\"",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This happens because of how attention works.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How Attention Drives This Cost",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Inside the model, each word looks at every other word to understand context.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For a sentence like:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "\"The cat sat\"",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Each word interacts with all others:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "\"The\" looks at \"cat\" and \"sat\"\n\"cat\" looks at \"The\" and \"sat\"\n\"sat\" looks at \"The\" and \"cat\"",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "As the sentence grows longer, the amount of work increases rapidly.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "If there are n words, the number of interactions is proportional to n × n.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Now combine this with generation:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Step 1: process 3 words → ~9 interactions\nStep 2: process 4 words → ~16 interactions\nStep 3: process 5 words → ~25 interactions",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This leads to a growing amount of repeated computation.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The Core Idea Behind KV Caching",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Instead of recomputing everything, we store intermediate results and reuse them.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Inside each layer of the model, for every word, two important vectors are created:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A key vector (used to determine relevance)\nA value vector (used to carry information)",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "KV caching means:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Store these vectors so they can be reused when new words are generated.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What Exactly Is Being Stored?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Let’s define the components clearly.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A vector is simply a list of numbers, for example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "[0.2, -1.1, 0.7, ...]",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A layer is one stage of processing. Models typically have many layers, and each word is processed through all of them.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For every word and every layer, we store:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "one key vector\none value vector",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Building a Simple Example",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Assume:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "1 sentence\n3 words: \"The cat sat\"\n2 layers",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For each layer:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Each word produces a key vector and a value vector",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So for one layer:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "3 words × 2 vectors = 6 vectors",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For two layers:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "2 × 6 = 12 vectors",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What Happens When a New Word Is Added?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Now the sentence becomes:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "\"The cat sat on\"",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "We only compute vectors for the new word.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For that new word:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Layer 1 → key + value\nLayer 2 → key + value",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So we add:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "2 layers × 2 vectors = 4 vectors",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The previously computed vectors are reused.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why This Improves Performance",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "With KV caching:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Previously computed key and value vectors are reused\nOnly the new word is processed",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This changes the cost of generation significantly.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Without caching:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Each step recomputes everything → grows rapidly",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "With caching:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Each step processes only the new word → grows linearly",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The Memory Tradeoff",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The improvement in speed comes at the cost of memory.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "All stored key and value vectors must remain in memory during generation.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Where Is This Data Stored?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "KV cache is stored in GPU memory (also called VRAM).",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This is the same memory used for:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "model weights\nintermediate computations",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It is stored on the GPU because:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "the model runs on the GPU\naccessing GPU memory is much faster than transferring data from CPU memory",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why Memory Becomes a Bottleneck",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Let’s scale the earlier example.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Assume:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "32 layers\n1000 words\neach vector contains 4096 numbers",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Total vectors:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "32 layers × 1000 words × 2 (key and value) = 64,000 vectors",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Total numbers:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "64,000 × 4096 ≈ 262 million numbers",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "If each number takes 2 bytes of memory:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "≈ 524 MB for a single user",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "With multiple users, memory usage grows proportionally.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Intuition for Memory Growth",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "For every new word:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "new key and value vectors are added\nacross all layers",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This means memory grows linearly with:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "number of words\nnumber of layers\nnumber of users",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Putting It All Together",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "KV caching introduces a fundamental tradeoff:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Faster generation by avoiding repeated computation\nIncreased memory usage due to storing intermediate results",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What Comes Next",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "As systems scale, memory becomes the primary constraint rather than computation.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This leads to the next set of questions:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How do we manage GPU memory efficiently?\nHow do we serve many users simultaneously?\nHow do we reduce the size of the KV cache?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "These questions lead to techniques such as:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "paged attention\nprefix caching\nquantization\nmemory offloading",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "We will explore these in the next part.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Summary",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "KV caching improves inference speed by storing key and value vectors for each word at every layer, avoiding recomputation. However, this shifts the bottleneck from computation to memory, making efficient memory management critical in real-world systems.",
+      "type": "paragraph"
+    }
+  ],
+  "images": [],
+  "bodyHash": "e5aa8816de1f5870bd30a8630ba021011c1efb5af4de17968e8d46c545b1179c"
+}

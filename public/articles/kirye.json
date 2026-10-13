@@ -1,0 +1,1703 @@
+{
+  "id": "kirye",
+  "title": "LLM Inference Challenges - Understanding Inference Metrics",
+  "author": "Anurag Mohan",
+  "date": "June 23, 2026",
+  "url": "https://www.linkedin.com/pulse/llm-inference-challenges-understanding-metrics-anurag-mohan-kirye",
+  "blocks": [
+    {
+      "links": [],
+      "text": "LLM Inference Challenges (Part 15)",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Understanding Inference Metrics",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "In the previous parts, we built a mental model for modern LLM inference systems.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "We covered:",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "Part 1",
+          "url": "https://www.linkedin.com/pulse/understanding-kv-caching-llm-inference-practical-intuitive-mohan-lcdee"
+        },
+        {
+          "text": "Part 2",
+          "url": "https://www.linkedin.com/pulse/llm-inference-challenges-memory-fragmentation-duplicate-anurag-mohan-8bjge"
+        },
+        {
+          "text": "Part 3",
+          "url": "https://www.linkedin.com/pulse/llm-inference-challenges-part-3-anurag-mohan-cmare"
+        },
+        {
+          "text": "Parts 4",
+          "url": "https://www.linkedin.com/pulse/llm-inference-challenges-why-we-need-multiple-gpus-anurag-mohan-z7ede"
+        },
+        {
+          "text": "Part 5",
+          "url": "https://www.linkedin.com/pulse/llm-inference-challenges-understanding-tensor-anurag-mohan-qvsve"
+        },
+        {
+          "text": "Part 6",
+          "url": "https://www.linkedin.com/pulse/llm-inference-challenges-pipeline-parallelism-anurag-mohan-vi12e"
+        },
+        {
+          "text": "Part 7",
+          "url": "https://www.linkedin.com/pulse/llm-inference-challenges-understanding-data-anurag-mohan-gvbne"
+        },
+        {
+          "text": "Part 8",
+          "url": "https://www.linkedin.com/pulse/llm-inference-challenges-understanding-distributed-serving-mohan-ehxof"
+        },
+        {
+          "text": "Part 9",
+          "url": "https://www.linkedin.com/pulse/llm-inference-challenges-understanding-gpu-networking-anurag-mohan-3omve"
+        },
+        {
+          "text": "Part 10",
+          "url": "https://www.linkedin.com/pulse/llm-inference-challenges-understanding-prefill-vs-decode-mohan-tl4fe"
+        },
+        {
+          "text": "Part 11",
+          "url": "https://www.linkedin.com/pulse/llm-inference-challenges-understanding-continuous-batching-mohan-i5bre"
+        },
+        {
+          "text": "Part 12",
+          "url": "https://www.linkedin.com/pulse/llm-inference-challenges-understanding-anurag-mohan-sokpe"
+        },
+        {
+          "text": "Part 13",
+          "url": "https://www.linkedin.com/pulse/llm-inference-challenges-understanding-vllm-anurag-mohan-0d1ee"
+        }
+      ],
+      "text": "KV cache → Part 1 \nMemory challenges → Part 2 \nGPU utilization and batching → Part 3 \nMulti-GPU inference → Parts 4, Part 5, Part 6, Part 7\nDistributed serving and routing → Part 8 \nGPU communication and networking → Part 9 \nPrefill vs Decode → Part 10 \nContinuous batching → Part 11 \nPagedAttention → Part 12 \nvLLM architecture → Part 13 \nCUDA, PyTorch, vLLM, CPU inference, routing, and agents → Part 14 ",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "At this point, the system picture is much clearer.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But once we understand how inference works, the next question becomes:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How do we know if the inference system is working well? ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That leads us to inference metrics.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why do inference metrics matter?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Until now, we were mostly building intuition.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But real systems need measurement.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Metrics help answer questions like:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Are users waiting too long?\nIs the GPU actually being used well?\nIs batching working?\nIs prefill slow?\nIs decode slow?\nIs KV cache memory becoming the bottleneck?\nAre queues building up?\nCan the system handle more users?\nDid our latest change improve performance or hurt it?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Without metrics, we are mostly guessing.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "With metrics, we can start observing the system.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What does the user experience look like?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "From the user’s point of view, inference feels simple:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "send prompt\nwait for response to start\nwatch tokens stream\nreceive final answer",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So the user mostly experiences two things:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "how long it takes before the first token appears\nhow fast the remaining tokens continue appearing",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "These map to two important metrics:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Time To First Token\nInter-token latency",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is Time To First Token?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Time To First Token is usually written as:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "TTFT",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "It means:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "how long the user waits before the first generated token appears",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "user sends request at 10:00:00.000\nfirst token appears at 10:00:01.200\nTTFT = 1.2 seconds",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "TTFT is important because it controls the first impression.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "If TTFT is high, the system feels slow even if the rest of the answer streams quickly.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What happens before the first token?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Before the first token appears, several things happen:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "request arrives\nrequest may wait in a queue\nscheduler admits the request\nprompt is tokenized\nprefill runs\nKV cache is created\nfirst decode step runs\nfirst token is produced",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A simple mental model:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "TTFT = queue time + prefill time + first decode step + system overhead",
+      "type": "code"
+    },
+    {
+      "links": [
+        {
+          "text": "Part 10",
+          "url": "https://www.linkedin.com/pulse/llm-inference-challenges-understanding-prefill-vs-decode-mohan-tl4fe"
+        }
+      ],
+      "text": "This connects directly to Prefill vs Decode, which we covered in Part 10.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why can TTFT become high?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "TTFT can increase because of:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "long prompts\nhigh queue time\noverloaded replicas\nslow prefill\nlimited KV cache memory\nscheduler delays\ntoo many active requests\ntraffic spikes",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So when TTFT is high, the better question is not:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why is the model slow? ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The better question is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Where is the time being spent? ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "What is inter-token latency?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "After the first token appears, generation continues token by token.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Inter-token latency means:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "how much time passes between generated tokens ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "token 1 appears\n100 ms later, token 2 appears\n100 ms later, token 3 appears",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Inter-token latency is roughly:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "100 ms per token ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This metric tells us how smooth the streaming experience feels.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why is inter-token latency connected to decode?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "After prefill, the system enters decode.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Decode generates one token at a time:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "token 1\ntoken 2\ntoken 3\ntoken 4",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Each token depends on the previous token.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So inter-token latency is mostly connected to decode speed.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Can TTFT be good while inter-token latency is bad?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Yes.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A system can start quickly but stream slowly.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "TTFT = good\ninter-token latency = bad",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This usually means:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "request admission was fast\nprefill was acceptable\nbut decode is slow",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Possible causes:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "small active batch\nmemory bandwidth pressure\nKV cache access overhead\ncommunication overhead\ninefficient scheduling during decode",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "Part 11",
+          "url": "https://www.linkedin.com/pulse/llm-inference-challenges-understanding-continuous-batching-mohan-i5bre"
+        }
+      ],
+      "text": "This connects to continuous batching, which we covered in Part 11.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Can TTFT be bad while inter-token latency is good?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Yes.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A request can wait a long time before starting, but stream quickly once it begins.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "TTFT = 5 seconds\ninter-token latency = 50 ms",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This may indicate:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "queueing problem\nlong prefill\nscheduler pressure\nKV cache memory pressure\noverloaded serving replica",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So TTFT and inter-token latency tell different stories.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "We need both.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is total request latency?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Total request latency means:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "time from request arrival to final token ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "It includes:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "queue time\nprefill\ndecode\nstreaming\nfinal completion",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A simple mental model:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Total latency = TTFT + time to generate remaining tokens ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "But total latency can be misleading.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Because output length matters.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A request generating 20 tokens and a request generating 1000 tokens should not be compared directly without context.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So total latency should be interpreted together with:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "input tokens\noutput tokens\nTTFT\ninter-token latency\nconcurrency level",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is throughput?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Throughput means:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "how much useful work the system completes over time",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "For LLM inference, this is usually measured as:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "tokens per second",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "system generates 10,000 output tokens in 10 seconds\nthroughput = 1000 tokens/sec",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Throughput matters because inference systems usually serve many users.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Higher throughput usually means:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "more users served\nbetter GPU efficiency\nlower cost per token\nbetter batching efficiency",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What kinds of throughput should we track?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "There are a few useful throughput metrics:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Output tokens/sec\nInput tokens/sec\nTotal tokens/sec\nRequests/sec",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Tokens/sec is usually more meaningful than requests/sec because LLM requests vary a lot.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "One request may generate 10 tokens.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Another may generate 1000 tokens.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So request count alone does not describe system load very well.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why separate input and output tokens?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Because prefill and decode behave differently.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Prefill processes input tokens.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Decode generates output tokens.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Example workloads:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "long prompt + short answer\nshort prompt + long answer\nlong prompt + long answer\nmany short chat requests",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Each workload stresses the system differently.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So we should ask:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Are we measuring prefill throughput?\nAre we measuring decode throughput?\nAre we measuring total throughput?",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "Part 10 — Prefill vs Decode",
+          "url": "https://www.linkedin.com/pulse/llm-inference-challenges-understanding-prefill-vs-decode-mohan-tl4fe"
+        }
+      ],
+      "text": "This again connects to Part 10 — Prefill vs Decode.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is queue time?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Queue time means:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "how long a request waits before the inference engine starts processing it",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Queue time affects TTFT directly.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Queue time can grow when:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "too many requests arrive\nactive batch is full\nKV cache memory is limited\nGPU workers are busy\nprefill workload is large\nscheduler cannot admit new requests quickly",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Queue time is often one of the clearest signs that demand is exceeding capacity.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is batch size?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Batch size means:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "how many requests or tokens are processed together ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "In LLM inference, batching can mean different things:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "number of active requests\nnumber of active sequences\nnumber of tokens processed in a step\nnumber of prefill tokens\nnumber of decode tokens",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The simple intuition:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "larger batches usually improve GPU utilization\nbut larger batches can increase waiting time",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "Part 11 — Continuous Batching",
+          "url": "https://www.linkedin.com/pulse/llm-inference-challenges-understanding-continuous-batching-mohan-i5bre"
+        }
+      ],
+      "text": "This is the latency-throughput tradeoff we covered in Part 11 — Continuous Batching.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is batch occupancy?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Batch occupancy means:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "how full the active batch is compared to what the system can handle",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "system can efficiently handle 32 active decode requests\ncurrently running only 8 active decode requests\nbatch occupancy is low",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Low batch occupancy can mean:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "GPU is not receiving enough work\nthroughput may be low\nbatching is not effective",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This matters especially during decode because each request only contributes one token of work at a time.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why does batch occupancy matter during decode?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "During decode:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "each active request generates one token\neach decode step is relatively small\nGPU efficiency depends on having enough active requests",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Batch = [A]",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The system runs a decode step for one request.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Now compare:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Batch = [A, B, C, D, E, F, G, H] ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The system still runs a decode step, but many users receive tokens.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That is why continuous batching tries to keep the active batch full.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is GPU utilization?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "GPU utilization tells us how busy the GPU is.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Simple mental model:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "high GPU utilization = GPU is actively doing work\nlow GPU utilization = GPU is waiting or underused",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This matters because GPUs are expensive.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "If utilization is low, we may be paying for hardware that is not doing enough useful work.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Is high GPU utilization always good?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Not always.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "High GPU utilization can mean the system is efficient.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But it can also mean the system is overloaded.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "GPU utilization = 99%\nqueue time = high\nTTFT = bad\np99 latency = bad",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That means the GPU is busy, but users are waiting too long.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So GPU utilization must be read together with:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "TTFT\nqueue time\nthroughput\np95/p99 latency\nerror rate",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Is low GPU utilization always bad?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Not always.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Low utilization may be fine during low traffic.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But low utilization during high traffic can indicate a problem.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Possible causes:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "batches are too small\nscheduler is not filling batches\nrequests are spread across too many replicas\nCPU bottleneck\ntokenization bottleneck\nnetwork bottleneck\nmemory bottleneck\ncommunication overhead",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So utilization only makes sense with workload context.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is GPU memory utilization?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "GPU memory is used for:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "model weights\nKV cache\nactivations\ntemporary buffers\nruntime overhead",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Model weights are mostly fixed after loading.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "KV cache grows with:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "active requests\nprompt length\ngenerated tokens\ncontext window size",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So GPU memory utilization tells us how much memory capacity is still available.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is KV cache utilization?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "KV cache utilization tells us:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "how much KV cache memory is currently occupied",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This is important because KV cache often limits concurrency.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "If KV cache utilization is high:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "fewer new requests can enter\nactive batch size may be limited\nqueue time may increase\nTTFT may increase\nthroughput may stop improving",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This connects directly to:",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "Part 1 — KV Cache",
+          "url": "https://www.linkedin.com/pulse/understanding-kv-caching-llm-inference-practical-intuitive-mohan-lcdee?lipi=urn%3Ali%3Apage%3Ad_flagship3_publishing_post_edit%3BgxiVufSBSEyHgj%2BZojMxNA%3D%3D"
+        },
+        {
+          "text": "Part 2 — Memory Challenges",
+          "url": "https://www.linkedin.com/pulse/llm-inference-challenges-memory-fragmentation-duplicate-anurag-mohan-8bjge?lipi=urn%3Ali%3Apage%3Ad_flagship3_publishing_post_edit%3BgxiVufSBSEyHgj%2BZojMxNA%3D%3D"
+        },
+        {
+          "text": "Part 12 — PagedAttention",
+          "url": "https://www.linkedin.com/pulse/llm-inference-challenges-understanding-anurag-mohan-sokpe?lipi=urn%3Ali%3Apage%3Ad_flagship3_publishing_post_edit%3BgxiVufSBSEyHgj%2BZojMxNA%3D%3D"
+        }
+      ],
+      "text": "Part 1 — KV Cache \nPart 2 — Memory Challenges \nPart 12 — PagedAttention ",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why can KV cache limit concurrency?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Every active request needs KV cache.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Longer sequences need more cache.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Request A → 500 tokens\nRequest B → 4000 tokens\nRequest C → 8000 tokens",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "As active sequences grow, KV cache memory fills up.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Eventually, the system may have compute capacity but not enough memory to admit more requests.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This is one of the most important inference lessons:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "LLM inference is not only compute-limited.\nIt can also be memory-limited.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Why does this connect to PagedAttention?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "PagedAttention helps manage KV cache memory more efficiently.",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "Part 12",
+          "url": "https://www.linkedin.com/pulse/llm-inference-challenges-understanding-anurag-mohan-sokpe?lipi=urn%3Ali%3Apage%3Ad_flagship3_publishing_post_edit%3BgxiVufSBSEyHgj%2BZojMxNA%3D%3D"
+        }
+      ],
+      "text": "The key idea from Part 12 :",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "KV cache is split into fixed-size blocks\nblocks do not need to be physically contiguous\nrequests can grow dynamically\nfinished requests return blocks to the pool\nmemory fragmentation becomes less harmful",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So when KV cache utilization is high, we start seeing why memory management matters so much.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What are p50, p95, and p99?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Average latency is not enough.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "We also need percentiles.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Common latency percentiles:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "p50\np95\np99",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "These help us understand tail latency.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why does tail latency matter?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Tail latency shows the slow cases.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "p50 TTFT = 500 ms\np99 TTFT = 12 seconds",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This means most users are fine, but some users wait a very long time.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For production systems, p95 and p99 matter because users often remember the bad cases.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Tail latency can increase because of:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "long prompts\nlarge outputs\ntraffic spikes\nqueue buildup\nmemory pressure\nscheduler delays\nreplica imbalance\nnetwork issues",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is error rate?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Error rate tells us how often requests fail.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Failures may include:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "timeouts\nout-of-memory errors\nserver errors\ncancelled requests\nrate limit errors\nmodel worker crashes\nunhealthy replicas",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A fast system is not useful if it fails often.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So error rate is an important operational metric.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is timeout rate?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Timeout rate tells us how often requests take too long and get cancelled or rejected.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Timeouts may happen because:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "queues are too long\nresponses are too long\nreplica is overloaded\nmodel worker is stuck\nnetwork call is slow\nsystem capacity is too low",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Timeouts usually mean latency has become bad enough to break the user experience.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is cost per token?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Cost per token means:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "how much it costs to process or generate each token",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Simple mental model:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "GPU cost / tokens generated = cost per token",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This is where inference metrics become business metrics.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "If throughput improves while hardware cost stays the same:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "cost per token goes down\nGPU usage becomes more efficient\nserving economics improve",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This is why batching, scheduling, and memory efficiency matter.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "They are not just technical optimizations.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "They directly affect cost.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How do these metrics connect to earlier concepts?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "A useful mapping:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This table helped me connect the conceptual articles to real system operations.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What does an overloaded system look like?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "An overloaded inference system may show:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "queue time increasing\nTTFT increasing\np95/p99 latency getting worse\nKV cache utilization near limit\nGPU utilization very high\ntimeout rate increasing\nerror rate increasing",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Possible fixes:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "add more replicas\nimprove routing\nreduce max context length\nreduce max output tokens\nuse a smaller model\nimprove batching\nimprove KV cache efficiency\nautoscale earlier",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What does an underutilized system look like?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "An underutilized system may show:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "low GPU utilization\nlow batch occupancy\nlow throughput\ngood latency",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This may be fine during low traffic.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But if traffic is high, possible causes include:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "requests spread across too many replicas\nbatch sizes too small\nscheduler not filling batches\nrouting is inefficient\nworkload is too fragmented",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This is the other side of the latency-throughput tradeoff.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What does a memory-limited system look like?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "A memory-limited system may show:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "high GPU memory usage\nhigh KV cache utilization\nlimited ability to admit new requests\nqueue time increasing\nbatch size capped\nGPU compute not fully used",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This is where the system may have compute available but still cannot serve more users because memory is the bottleneck.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What does a decode bottleneck look like?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "A decode bottleneck may show:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "TTFT is acceptable\ntokens stream slowly\ninter-token latency is high\ndecode throughput is low\nactive requests keep running for a long time\nGPU utilization may be uneven",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Possible causes:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "small active batches\nKV cache access overhead\nmemory bandwidth pressure\ncommunication overhead\ntoo many long-running requests",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This is why continuous batching matters.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What does a prefill bottleneck look like?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "A prefill bottleneck may show:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "TTFT is high\nlong prompts are especially slow\ninput tokens/sec is low\nqueue time may increase\ndecode may be fine after generation starts",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This often happens with:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "long documents\nlong RAG contexts\nlarge prompts\nmany new requests arriving together",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why is workload shape important?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Metrics only make sense if we understand the workload.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Important workload dimensions:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "prompt length\noutput length\nconcurrency\nmodel size\ncontext window\nstreaming vs non-streaming\nsampling parameters\nhardware type\nnumber of replicas\nquantization level",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "short prompts + short outputs\nshort prompts + long outputs\nlong prompts + short outputs\nlong prompts + long outputs",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Each workload stresses the system differently.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So benchmark numbers without workload details are not very useful.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What should a good benchmark mention?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "A useful benchmark should include:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "model name\nmodel size\nhardware\nserving engine\nnumber of GPUs\nquantization\nprompt length\noutput length\nconcurrency level\nstreaming or non-streaming\nmeasured metrics\np50/p95/p99 values\nany important config settings",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Without these details, performance numbers are hard to compare.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is the simplest metric set to start with?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "For the first hands-on experiment, I would start with:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "TTFT\ninter-token latency\ntotal request latency\noutput tokens/sec\nrequests/sec\nGPU utilization\nGPU memory usage",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Then later add:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "queue time\nKV cache utilization\nbatch occupancy\np50/p95/p99 latency\nerror rate\ncost per token",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The goal is not to measure everything on day one.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The goal is to start connecting concepts to real observations.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How does this connect to LLMOps?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "This is where inference becomes operational.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "LLMOps is not only:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "deploy the model",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "It is also:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "monitor the model service\nunderstand latency\nwatch GPU usage\ndetect queue buildup\ntrack failures\nunderstand cost\nscale replicas\ndebug bottlenecks\ncompare serving configurations",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So inference metrics are the bridge between:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "understanding inference systems",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "and",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "operating inference systems",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "What is the key mental model?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "I would summarize inference metrics like this:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "TTFT\nInter-token latency\nThroughput\nQueue time\nGPU utilization\nGPU memory utilization\nKV cache utilization\nBatch occupancy\np95/p99 latency\nError rate\nCost per token",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Together, these metrics tell us whether the inference system is healthy.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why this article matters",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Until now, I was mostly asking:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How does inference work?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Now the question becomes:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How do we observe inference working?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That is a big shift.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Because real inference engineering is not only about knowing the concepts.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It is also about:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "measuring behavior\nfinding bottlenecks\nunderstanding tradeoffs\nimproving latency\nimproving throughput\nreducing cost\nkeeping the system reliable",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This is where the learning starts moving from mental models into hands-on systems work.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What comes next?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Now that the key inference metrics are clearer, the next step is to measure them in a real serving system.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So the next part will be: Running vLLM Locally and Measuring Inference Metrics",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This is also a good point to start a small GitHub repo.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The goal is not to build a perfect benchmarking system immediately.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The goal is to start building intuition from real measurements.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Because once we can measure the system, we can finally start experimenting with it.",
+      "type": "paragraph"
+    }
+  ],
+  "images": [
+    {
+      "alt": "Metrics table: inter-token latency, throughput, queue time, batch occupancy, GPU utilization, GPU memory usage, KV-cache utilization, tail latency, and cost per token, mapped to the earlier inference articles.",
+      "url": "https://media.licdn.com/dms/image/v2/D4E12AQHzREsf-5U7MA/article-inline_image-shrink_1500_2232/B4EZ7bEuStJkAU-/0/1781791909417?e=1793232000&v=beta&t=zUnHPRTkJmTKHX23VBC--dLrZppbd6vcd3KbBTMqLpA",
+      "localPath": "/article-images/kirye-1.png"
+    }
+  ],
+  "bodyHash": "d65541985230f183a5429bcc308f92e6cf0342c4e58f049b1fe93d5160a9d233"
+}

@@ -1,0 +1,1121 @@
+{
+  "id": "sokpe",
+  "title": "LLM Inference Challenges - Understanding PagedAttention",
+  "author": "Anurag Mohan",
+  "date": "June 11, 2026",
+  "url": "https://www.linkedin.com/pulse/llm-inference-challenges-understanding-anurag-mohan-sokpe",
+  "blocks": [
+    {
+      "links": [],
+      "text": "In the previous part, we explored continuous batching.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The main idea was:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Traditional batching:\nBatch is fixed.\n\nContinuous batching:\nBatch keeps changing. ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Requests enter. Requests leave. Some finish early. Some continue generating. New requests join between decode steps.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This helps keep GPUs busy during decode.But it also creates another problem.If the active batch is constantly changing, then the KV cache memory is also constantly changing.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That leads us to one of the most important ideas in modern LLM serving systems:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "PagedAttention ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "PagedAttention is one of the core ideas behind vLLM. It helps manage KV cache memory more efficiently by using an idea similar to paging in operating systems.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The simple connection is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Continuous batching\nkeeps the compute side busy.\n\nPagedAttention\nkeeps the memory side efficient. ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Why does KV cache memory become difficult?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "During generation, every token creates key and value tensors. These are stored in the KV cache so the model does not need to recompute previous attention information again.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For one request, the KV cache grows like this:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Prompt processed → KV cache created\nToken 1 generated → KV cache grows\nToken 2 generated → KV cache grows\nToken 3 generated → KV cache grows ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Now imagine many requests running together:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Request A → 100 tokens\nRequest B → 500 tokens\nRequest C → 50 tokens\nRequest D → 2000 tokens ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Each request has its own KV cache.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Each request grows at a different speed.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Each request finishes at a different time.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This is already difficult. Continuous batching makes it even more dynamic.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why continuous batching makes memory harder",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "With continuous batching, the active batch changes during generation.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Step 1:\nBatch = [A, B, C, D]\n\nStep 2:\nA finishes\nE enters\n\nBatch = [E, B, C, D]\n\nStep 3:\nC finishes\nF enters\n\nBatch = [E, B, F, D] ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This is great for GPU utilization.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But memory management now becomes more complicated.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The system constantly needs to:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "allocate KV cache\nextend KV cache\nfree KV cache\nreuse KV cache ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So the system is not only scheduling compute.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It is also continuously managing GPU memory.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why not reserve memory upfront?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "A simple strategy would be:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Give each request one large memory region. ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "For example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Request A → space for 2048 tokens\nRequest B → space for 2048 tokens\nRequest C → space for 2048 tokens ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This sounds simple, but it wastes a lot of memory.Suppose Request A only generates 100 tokens.Then we reserved space for 2048 tokens, but used only 100.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Reserved:\n2048 token slots\n\nUsed:\n100 token slots\n\nWasted:\n1948 token slots ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That is expensive because GPU memory is limited.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "And during inference, memory is not only used for model weights. It is also used for KV cache, activations, and active requests.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "If KV cache memory is wasted, fewer requests can fit in the active batch.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That directly hurts throughput.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why not allocate exactly what each request needs?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Because we usually do not know the final length in advance.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "One user may ask for a short answer.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Another user may ask for a long explanation.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Some requests stop early.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Some reach the max token limit.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Some continue generating for a long time.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So when a request starts, the system does not always know how much KV cache memory it will eventually need.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What if memory grows dynamically?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "That sounds better.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Start small, then allocate more memory as the request grows.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Request A starts → allocate memory\nRequest A generates more tokens → allocate more memory\nRequest A keeps going → allocate more memory ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "But this can create another problem:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "fragmentation ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "GPU memory may start looking like this:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "[A][A][B][free][C][A][free][D][C] ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "There is free memory.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But it is scattered.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So the system may have enough total free memory, but not enough usable continuous memory.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That is fragmentation.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why fragmentation is bad for inference",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "KV cache memory controls how many active requests can fit on the GPU.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "If memory becomes fragmented, the scheduler may not be able to admit new requests.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Waiting Queue:\n[E, F, G, H]\n\nGPU memory:\nfragmented ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The GPU may still have compute capacity.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But the system cannot add more requests because KV cache memory is not available in a useful form.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So throughput drops.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This is the core problem PagedAttention is trying to solve.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is the key idea behind PagedAttention?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "PagedAttention borrows an idea from operating systems.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "In an operating system, a program may think it has one continuous memory space.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But physically, memory can be split into small pages.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The operating system maps:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "virtual pages → physical pages ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "PagedAttention applies a similar idea to KV cache.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Instead of storing one request’s KV cache in one large continuous memory region, it splits the KV cache into smaller fixed-size blocks.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So the mapping becomes:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "logical KV blocks → physical KV blocks ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The request can still behave as if its KV cache is continuous.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But physically, those blocks can live in different places in GPU memory.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What does this look like?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Without paging, Request A may need one continuous region:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Request A:\n[A A A A A A A A] ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "With PagedAttention, Request A can be split into blocks:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Request A logical view:\n[A1][A2][A3][A4] ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "But physically, those blocks may be stored like this:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "GPU memory:\n[A1][B1][free][A3][C1][A2][A4] ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The blocks are not next to each other.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That is okay.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The system keeps a mapping table that tells it where each logical block is stored physically.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This mapping is called a block table.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is a block table?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "A block table maps the logical order of a sequence to physical GPU memory blocks.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Request A logical blocks:\n\nA0 → physical block 7\nA1 → physical block 2\nA2 → physical block 9\nA3 → physical block 4 ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So the request sees:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "[A0][A1][A2][A3] ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "But GPU memory may store them as:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Block 2 → A1\nBlock 4 → A3\nBlock 7 → A0\nBlock 9 → A2 ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The block table connects the logical sequence order with the actual physical memory locations.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This is the main trick.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "PagedAttention separates:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "logical KV cache order ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "from:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "physical GPU memory layout ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Why does this help?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Because now the system does not need one large continuous memory region for each request.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It can allocate small blocks as needed.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Request A starts:\nallocate block A0\n\nRequest A grows:\nallocate block A1\n\nRequest A grows more:\nallocate block A2 ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The blocks can come from anywhere in the free block pool.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "When the request finishes, its blocks are returned:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Request A finishes:\n\nA0 → free\nA1 → free\nA2 → free ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Now other requests can reuse those blocks.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This makes memory allocation and reuse much more flexible.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why fixed-size blocks help",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Fixed-size blocks simplify memory management.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Instead of handling many differently sized memory chunks:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "small request memory\nmedium request memory\nlarge request memory\nvery large request memory ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "the system mostly handles one unit:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "KV cache block ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This makes allocation easier.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It also makes freeing memory easier.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "And because blocks do not need to be physically contiguous, fragmentation becomes much less harmful.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Is memory waste completely removed?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Not completely.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "There can still be unused space in the last block.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Block size = 16 tokens\nRequest uses 35 tokens ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Then:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Block 1 → 16 tokens used\nBlock 2 → 16 tokens used\nBlock 3 → 3 tokens used ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The last block still has unused space.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But this is much better than reserving memory for thousands of tokens upfront.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So instead of wasting huge continuous memory regions, the waste is mostly limited to the final partially used block.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How does this work with continuous batching?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Continuous batching keeps changing the active batch.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "PagedAttention makes that manageable.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A finishes → free A's blocks\nE enters → allocate blocks to E\nB grows → allocate one more block to B\nC finishes → free C's blocks\nF enters → allocate blocks to F ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This is why continuous batching and PagedAttention fit together so naturally.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Continuous batching creates a dynamic scheduling problem.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "PagedAttention provides a memory system that can handle that dynamism.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Does PagedAttention make attention computation cheaper?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Not exactly.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "PagedAttention does not remove attention.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It does not remove autoregressive generation.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It does not make one request generate all future tokens in parallel.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The model still needs the KV cache.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The model still generates tokens one by one.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The main improvement is memory management.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So the key idea is not:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "do less attention ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The key idea is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "store and access KV cache more efficiently ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Why does better memory usage improve throughput?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Throughput is not only limited by compute.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It is also limited by how many active requests can fit in memory.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "If KV cache memory is wasted, the system may only fit a small active batch:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Active batch = [A, B, C] ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "If memory is managed efficiently, the system may fit more active requests:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Active batch = [A, B, C, D, E, F, G, H] ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Now each decode step generates tokens for more users.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That usually means:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "better GPU utilization\nhigher tokens per second\nlower cost per token ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So PagedAttention improves throughput indirectly by allowing the system to use GPU memory more efficiently.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is the simplest analogy?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Imagine a notebook.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Without paging, every request needs a long continuous set of pages.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "If the notebook has scattered empty pages, they may be hard to use.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "With paging, each request can use any available page.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The index tells us the correct order.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Request A:\npage 12 → page 3 → page 18 → page 7 ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The pages are scattered.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But the index makes them readable in order.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "PagedAttention does something similar for KV cache.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The KV blocks are scattered.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The block table provides the order.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why is this important for vLLM?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "vLLM is strongly associated with PagedAttention because this memory-management idea is one of the reasons vLLM can serve LLMs efficiently.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Modern serving systems need to handle many active sequences at the same time.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Those sequences:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "start at different times\ngrow token by token\nfinish at different times\nneed different amounts of memory ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "PagedAttention makes this easier by treating KV cache memory more like a paged memory system.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Instead of forcing each request into one large continuous region, it allows the system to allocate and reuse smaller blocks dynamically.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That is a powerful idea.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is the key mental model?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Without PagedAttention:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "KV cache needs large continuous memory.\nRequests have unpredictable lengths.\nMemory gets wasted or fragmented.\nBatch size becomes limited.\nThroughput suffers. ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "With PagedAttention:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "KV cache is split into blocks.\nBlocks can live anywhere in GPU memory.\nBlock tables preserve logical order.\nBlocks are allocated on demand.\nFinished requests return blocks to the pool. ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That is the core idea.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What does PagedAttention not solve?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "PagedAttention does not solve every inference problem.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It does not remove sequential decoding.\nIt does not eliminate the KV cache.\nIt does not replace scheduling.\nIt does not remove the need for batching.\nIt mainly improves how KV cache memory is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "allocated\nstored\naccessed\nreused\nshared ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So the limitation is important:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "PagedAttention improves memory efficiency.\n\nIt does not remove the fundamental\nautoregressive generation loop. ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Final intuition",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Continuous batching answers:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How do we keep the active batch full during decode? ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "PagedAttention answers:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How do we store KV cache efficiently\nwhile that active batch keeps changing? ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Together:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Continuous batching:\ndynamic compute scheduling\n\nPagedAttention:\ndynamic KV cache memory management ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This is why these two ideas appear together so often in modern LLM serving systems.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "At this point, inference starts looking less like a simple model call and more like a runtime system.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The system is constantly asking:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Which requests should run now?\nHow much KV cache memory do they need?\nCan we admit more requests?\nWhich blocks are free?\nWhich requests have finished?\nHow do we keep GPUs busy without wasting memory? ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That is why PagedAttention matters.It is not just a small implementation detail.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It is one of the ideas that makes high-throughput LLM serving practical.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What comes next?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Now that continuous batching and PagedAttention are clearer, the next natural step is to zoom out and understand how these ideas fit inside a real serving engine.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That leads directly to:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "vLLM architecture ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Because vLLM brings together:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "scheduler\ncontinuous batching\nPagedAttention\nKV cache block manager\nprefill and decode execution\nrequest lifecycle ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So next, we can move from individual concepts to the bigger picture:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How does a real inference engine combine all of this? ",
+      "type": "code"
+    }
+  ],
+  "images": [],
+  "bodyHash": "8909d4ef68425122e554ba6efbffd7b8d1a35bd903fa5ea3658d3a13f1c9f811"
+}

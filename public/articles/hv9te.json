@@ -1,0 +1,666 @@
+{
+  "id": "hv9te",
+  "title": "From One Model Server to llm-d and CPU vLLM on Kubernetes",
+  "author": "Anurag Mohan",
+  "date": "August 4, 2026",
+  "url": "https://www.linkedin.com/pulse/from-one-model-server-llm-d-cpu-vllm-kubernetes-anurag-mohan-hv9te",
+  "blocks": [
+    {
+      "links": [],
+      "text": "LLM Inference Challenges - Hands-on Lab 03",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "In my earlier hands-on labs, the request path was relatively simple.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The first lab ran llama.cpp locally. The second moved to vLLM on an OCI GPU instance.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "In both cases, the mental model was mostly:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Client\n  ↓\nModel server\n  ↓\nModel inference",
+      "type": "code"
+    },
+    {
+      "links": [
+        {
+          "text": "Lab 3",
+          "url": "https://github.com/aruanurag/llm-inference-lab/tree/main/labs/03-llm-d-on-oci-cpu-cluster"
+        }
+      ],
+      "text": "Lab 3 changed that topology.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Instead of sending requests directly to one model server, I deployed a routed, Kubernetes-native inference service:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Client / Benchmark\n        ↓\nllm-d Router / EPP\n        ↓\nHealthy CPU vLLM replica",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That extra routing layer may look like a small change, but it introduced a much larger set of questions:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Which replica receives the request?\nHow much work can each replica admit?\nWhat happens when concurrency increases?\nWhere does the KV cache live?\nWhat happens when the cluster has no room for another pod?\nWhich metric changes when I tune a serving parameter?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This is where the lab became much more interesting.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Is this llm-d versus vLLM?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "No.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This was the first distinction I wanted the lab to make clear.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "vLLM is still performing the model inference. It processes the prompt, manages the local KV cache, schedules sequences, and generates tokens.",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "LLM-D",
+          "url": "https://llm-d.ai/docs/dev/architecture/core/router"
+        }
+      ],
+      "text": "llm-d provides the routing layer around the model-server pool. Its Router combines a proxy with the Endpoint Picker, or EPP. The EPP evaluates eligible endpoints and tells the proxy which model-server pod should receive the request. (LLM-D)",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So the relationship is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "llm-d\n=\nroutes and coordinates requests\n\nvLLM\n=\nruns the model inference",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The purpose of this lab was not to compare them. It was to observe what changes when inference becomes a routed service instead of one directly accessed server.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What did I build?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "I added a new experiment type to my OCI Inference Cloud workbench.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The app:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "validates the selected kubeconfig context and namespace\ninspects available Kubernetes nodes, CPU, memory, and versions\nrenders a deployment plan before changing the cluster\ndeploys the llm-d standalone Router and CPU vLLM pool\nwaits for the components to become ready\nstarts a local port-forward\nexposes an OpenAI-compatible endpoint\nsends test inference requests\nruns repeatable benchmark presets\nstores benchmark history for comparison",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "GitHub",
+          "url": "https://github.com/aruanurag/llm-inference-lab/tree/main/labs/03-llm-d-on-oci-cpu-cluster"
+        }
+      ],
+      "text": "The initial model is Qwen/Qwen2.5-1.5B-Instruct. It is public, small enough for the first CPU experiment, and does not require a Hugging Face token. (GitHub)",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "I also wanted the safety boundary to be very clear:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The app does not create the Kubernetes cluster.\n\nThe app does not delete the Kubernetes cluster.\n\nIt operates only inside the selected\nnamespace and Helm release.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That made the automation useful without hiding what it was doing.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why change only one setting at a time?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The workbench exposes many parameters:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "replica count\nCPU and memory per replica\nCPU KV-cache size\nmaximum model length\nmaximum concurrent sequences\nmaximum batched tokens\nreserved CPU cores\noptional CPU thread binding\nprefix caching\nbenchmark concurrency, request count, and output length",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Changing everything together can produce a different benchmark result, but it does not teach me much.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The more useful loop is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Establish baseline\n  ↓\nChange one setting\n  ↓\nRedeploy\n  ↓\nRepeat the same workload\n  ↓\nCompare the metrics\n  ↓\nWrite down why they may have changed",
+      "type": "code"
+    },
+    {
+      "links": [
+        {
+          "text": "GitHub",
+          "url": "https://github.com/aruanurag/llm-inference-lab"
+        }
+      ],
+      "text": "The repository was built around this idea: inference concepts become easier to understand when they are measured rather than only described. (GitHub)",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Which mental model made the metrics clearer?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The most useful one was separating inference into two phases:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Prefill\nand\nDecode",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "During prefill, the model processes the input prompt and builds the KV cache.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "During decode, it generates new tokens one at a time.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This immediately helped me understand why one benchmark number is never enough.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A longer prompt increases prefill work. I should therefore expect it to affect time to first token, especially TTFT p95.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A longer response spends more time in decode. In that case, inter-token latency, end-to-end latency, and output tokens per second become more important.",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "vLLM",
+          "url": "https://docs.vllm.ai/en/v0.8.5/design/v1/metrics.html"
+        }
+      ],
+      "text": "vLLM exposes these as separate concepts: TTFT measures the time until the first token, inter-token latency measures intervals between generated tokens, and end-to-end latency measures the full request. (vLLM)",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What do the main tuning knobs really control?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "I started grouping the parameters into four categories.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Compute",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "CPU per replica controls how much processing capacity the model server receives.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "If decode is CPU-bound, increasing CPU may improve inter-token latency and output speed. But that only helps when the cluster has those CPUs available.",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "vLLM",
+          "url": "https://docs.vllm.ai/en/stable/getting_started/installation/cpu/"
+        }
+      ],
+      "text": "Reserved CPU cores and thread binding are more advanced controls. vLLM recommends leaving CPU capacity for the serving framework and supports explicit OpenMP thread placement, including NUMA-aware automatic binding. (vLLM)",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Capacity",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "CPU KV-cache size controls how much memory vLLM can use for active sequence state.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A larger cache may allow more parallel requests, but it also consumes more host memory.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Maximum model length limits how much context one sequence can use. Increasing it provides more context capacity, but it also increases the amount of KV-cache space that a request may require.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "These are not simple speed settings. They are capacity-planning settings.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Scheduling",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Maximum concurrent sequences controls how many sequences the engine may keep active.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Maximum batched tokens controls how much token work can be admitted into a scheduling step.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Increasing either value can improve aggregate throughput, but it can also create more competition for CPU, batching capacity, and KV-cache memory.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So the tradeoff can look like:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Higher concurrency\n  ↓\nMore aggregate throughput\n  +\nMore queueing and competition\n  ↓\nHigher TTFT or p95 latency",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "“Higher” is not automatically “better.”",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Topology",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Replica count changes how many independent model servers can handle requests.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "More replicas can improve aggregate requests per second, but only when Kubernetes has enough unused CPU and memory to schedule them.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A desired replica count is not the same thing as available cluster capacity.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why was prefix caching my favorite experiment?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Prefix caching is a very clean way to connect prefill, KV cache, routing, and metrics.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Suppose many requests share a long beginning:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "[Large system prompt]\n[Company policies]\n[Product documentation]\n[Small changing question]",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The first request processes the entire prefix and builds its KV cache.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Later requests can reuse the cached prefix and avoid repeating that prefill work.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That should most directly affect:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "TTFT\nand\nrequests per second",
+      "type": "code"
+    },
+    {
+      "links": [
+        {
+          "text": "vLLM",
+          "url": "https://docs.vllm.ai/en/latest/features/automatic_prefix_caching/"
+        }
+      ],
+      "text": "It should not materially accelerate the decode phase. The new output tokens still need to be generated one at a time. vLLM’s documentation makes the same distinction: automatic prefix caching reduces repeated prompt processing, but it does not reduce the time required to generate new tokens. (vLLM)",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This also explains why my first instinct would have produced a poor benchmark.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A short prompt followed by a 128-token response mostly measures decode.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A better prefix-cache test uses:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "a shared 2,000–4,000-token prefix\na small changing question at the end\nshort outputs of roughly 16–32 tokens\nat least 30–50 requests\nidentical concurrency in both runs",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Then I can enable prefix caching, run the workload, disable it, redeploy, and repeat exactly the same test.",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "GitHub",
+          "url": "https://github.com/aruanurag/llm-inference-lab/tree/main/labs/03-llm-d-on-oci-cpu-cluster"
+        }
+      ],
+      "text": "The first request is still a cache miss. Later requests benefit only when the relevant prefix remains cached. (GitHub)",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "With multiple replicas, another question appears:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Did the request reach the replica\nthat already has the prefix?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That is where prefix caching and inference-aware routing start connecting.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What happened during the Kubernetes rollout?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "One of the most useful lessons came from a deployment that did not behave as expected.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "On a one-node CPU cluster, the vLLM pod may consume most of the allocatable CPU.",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "Kubernetes",
+          "url": "https://kubernetes.io/docs/tasks/run-application/update-deployment-rolling/"
+        }
+      ],
+      "text": "When I changed a serving parameter, Kubernetes started a rolling update. A normal rolling update can create an additional pod before terminating the old one, depending on maxSurge and maxUnavailable. (Kubernetes)",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But the node did not have enough CPU for both model-server pods.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The new pod stayed Pending with:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Insufficient CPU",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This was not a model error.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It was not an llm-d routing error.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It was a cluster-capacity and rollout-strategy problem.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The lab now uses:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "maxSurge: 0\nmaxUnavailable: 1",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That briefly terminates the old decoder pod so the newly configured pod can schedule.",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "GitHub",
+          "url": "https://github.com/aruanurag/llm-inference-lab/tree/main/labs/03-llm-d-on-oci-cpu-cluster"
+        }
+      ],
+      "text": "The cluster, namespace, llm-d Router Service, and release remain in place, but inference is briefly interrupted while the model-server pod is replaced. (GitHub)",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It is not a zero-downtime solution.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It is an honest solution for a capacity-constrained learning cluster.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The same lesson applies to scaling from one replica to two. If the first replica already consumes nearly all available CPU and memory, the second replica cannot appear simply because I changed a number in the UI.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "To test scale-out properly, the cluster needs real spare capacity or another worker node.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What experiments can readers run?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The full instructions are in Lab 3, but these are the experiments I would begin with:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Concurrency sweep: Keep the model and prompts fixed. Increase only benchmark concurrency and compare requests per second, TTFT p95, latency p95, and failures.\nPrefix caching on versus off: Use one long shared prefix, short changing questions, and short outputs. Compare TTFT p95 and requests per second more closely than decode tokens per second.\nCPU experiment: Keep everything else fixed and change CPU per replica. Observe whether ITL and output throughput improve, or whether another bottleneck remains.\nScheduling experiment: Change only maximum concurrent sequences or maximum batched tokens. Look for the point where throughput improves but tail latency begins to deteriorate.\nReplica experiment: Move from one to two replicas only on a cluster with enough unused capacity. Compare aggregate throughput, request distribution, readiness time, and behavior during scale-out.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For every run, I would save:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Configuration\nWorkload\nSuccessful and failed requests\nTTFT p95\nLatency p95\nApproximate ITL\nRequests/sec\nOutput tokens/sec\nObservations",
+      "type": "code"
+    },
+    {
+      "links": [
+        {
+          "text": "GitHub",
+          "url": "https://github.com/aruanurag/llm-inference-lab/tree/main/labs/03-llm-d-on-oci-cpu-cluster"
+        }
+      ],
+      "text": "A benchmark with zero successful requests is a connectivity failure, not a performance result. The endpoint must work before its numbers are compared with successful runs. (GitHub)",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What was the main learning?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The biggest lesson from this lab was that inference performance is not one speed number.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It is the interaction between:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Prefill\nDecode\nCPU capacity\nKV-cache capacity\nBatching\nQueueing\nConcurrency\nRouting\nReplica placement\nCluster capacity",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "A setting can improve throughput and hurt TTFT.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A larger cache can support more active work but consume the memory needed elsewhere.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A second replica can improve throughput, but only when Kubernetes can actually schedule it.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Prefix caching can dramatically reduce repeated prefill work, but it does not make decode tokens appear faster.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That is why I enjoyed this experiment.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "I was not looking for one “best” configuration.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "I was trying to make the system’s behavior visible.",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "GitHub",
+          "url": "https://github.com/aruanurag/llm-inference-lab/tree/main/labs/03-llm-d-on-oci-cpu-cluster"
+        }
+      ],
+      "text": "The complete deployment steps, benchmark workflow, experiment suggestions, and observation template are available in Lab 3 of the LLM Inference Lab repository. (GitHub)",
+      "type": "paragraph"
+    }
+  ],
+  "images": [],
+  "bodyHash": "bb7d86a628ea3b6ca6aa253a397c4038e1fba362c406f3049e9cfde2c4243698"
+}

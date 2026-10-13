@@ -1,0 +1,1106 @@
+{
+  "id": "3omve",
+  "title": "LLM Inference Challenges - Understanding GPU Communication & Networking",
+  "author": "Anurag Mohan",
+  "date": "May 28, 2026",
+  "url": "https://www.linkedin.com/pulse/llm-inference-challenges-understanding-gpu-networking-anurag-mohan-3omve",
+  "blocks": [
+    {
+      "links": [],
+      "text": "In the previous part, we explored distributed serving, replicas, request routing, schedulers, and how requests flow through large inference systems.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "At this point, something important starts becoming visible.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A replica is not just:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "one GPU\none machine\nor one server",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A replica may actually contain:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "many GPUs\nmany servers\ntensor parallel groups\npipeline stages\nschedulers\nKV cache systems",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "And all of these components must constantly communicate with each other.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That naturally leads to the next question.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why does GPU communication matter so much?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Modern inference systems are highly distributed.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "During inference:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "GPUs exchange activations\ntensor parallel GPUs combine partial outputs\npipeline stages pass intermediate tensors\nKV cache updates happen continuously\nschedulers coordinate batches",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So communication is happening constantly.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "And this communication can become a bottleneck very quickly.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why can communication become a bottleneck?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Suppose computation is extremely fast.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But after every computation:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "GPUs must wait for data\ntensors must move across devices\nsynchronization must happen",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Then eventually:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "communication time\n>\ncompute time ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "At that point:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "GPUs sit idle waiting for data\nutilization drops\nlatency increases\nthroughput suffers",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So large-scale inference is not only about GPU compute anymore.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It is also about:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "moving data efficiently\nbetween GPUs ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "What kinds of communication happen during inference?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Different parallelism strategies create different communication patterns.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Tensor parallelism requires very frequent GPU communication.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Because multiple GPUs cooperate on the same layer.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "GPU 1 → partial computation\nGPU 2 → partial computation\nGPU 3 → partial computation\nGPU 4 → partial computation ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Now their outputs must be combined.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This may happen:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "after every attention block\nafter matrix multiplications\nafter intermediate activations",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So tensor parallelism is extremely communication-heavy.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What about pipeline parallelism?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Pipeline parallelism communicates differently.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Here:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "one stage finishes computation\nthen sends activations to the next stage",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Stage 1 → Stage 2 → Stage 3 → Stage 4 ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So communication mainly happens:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "between stages\nduring forward progression through the model",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Compared to tensor parallelism:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "communication frequency is usually lower\nbut transferred tensors may still be large",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What about data parallelism?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Data parallelism is different.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "During inference:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "replicas are mostly independent\nrequests stay within one replica\ncommunication between replicas is smaller",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So inference-time data parallelism usually creates much less communication pressure.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why is tensor parallelism often limited to one server?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Because tensor parallelism requires extremely fast communication.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Suppose GPUs must synchronize after nearly every operation.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "If those GPUs are spread across slow networks:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "latency increases heavily\nsynchronization becomes expensive\nperformance collapses",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So systems often try to keep tensor parallel GPUs:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "inside the same machine ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "where communication is fastest.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How do GPUs communicate inside one server?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Inside a server, GPUs often communicate using:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "NVLink\nor\nNVSwitch ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "These are specialized high-speed GPU interconnects.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is NVLink?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "NVLink is a very high-speed communication link between GPUs.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Instead of:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "GPU → CPU → GPU ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "NVLink allows:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "GPU ↔ GPU ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "communication directly.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This provides:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "much higher bandwidth\nlower latency\nfaster synchronization",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "compared to normal PCIe communication.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why is this important?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Suppose tensor parallel GPUs constantly exchange activations.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Without fast communication:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "GPUs spend time waiting\nsynchronization slows down\nthroughput decreases",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "NVLink helps reduce that overhead.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This is one reason modern AI servers are designed heavily around:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "GPU interconnect topology ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "not just raw GPU count.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is NVSwitch?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "NVSwitch extends this idea further.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Instead of direct links between only certain GPUs:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "NVSwitch allows many GPUs to communicate efficiently together\nalmost like a high-speed GPU network switch",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "GPU 1 ↔ NVSwitch ↔ GPU 8 ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This becomes important in servers with:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "8 GPUs\n16 GPUs\nor larger GPU configurations",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What happens if one server is not enough?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Eventually models become too large.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Now:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "one replica may span many servers\ntensor parallel groups may cross machines\npipeline stages may live on different nodes",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Now communication must happen:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "across servers ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This is called:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "inter-node communication ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "At this point, what exactly is a replica then?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Honestly, this was one of the points that initially confused me while learning all this.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "At first, I was thinking about replicas similar to traditional backend systems:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Load Balancer\n   ↓\nServer 1\nServer 2\nServer 3 ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "where:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "one endpoint maps to one server\nand each server independently handles requests",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But modern inference systems work very differently.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A replica is usually not just:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "one GPU\none server\nor one machine",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Instead, a replica is closer to:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "one distributed model-serving runtime ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "built using:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "many GPUs\nmultiple servers\nnetworking\nschedulers\ncommunication libraries\nand inference software",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For example, systems like:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "vLLM\nTGI\nSGLang\nTensorRT-LLM",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "coordinate many GPUs together and expose them logically as:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "ONE serving endpoint ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So internally, a replica may look like:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Server A → GPUs 1–8\nServer B → GPUs 9–16\nServer C → GPUs 17–24\nServer D → GPUs 25–32 ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "But externally:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Load Balancer\n    ↓\nReplica Endpoint ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "still behaves like one model-serving unit.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So the important mental shift becomes:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Replica\n≠\none machine\n\nReplica\n=\nsoftware + distributed hardware\nworking together\nas one logical inference system ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "And honestly, this is where inference systems start feeling much closer to distributed supercomputing systems than traditional backend applications.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why is inter-node communication harder?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Because communication across servers is slower than communication inside one server.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Inside one machine:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "GPUs may use NVLink\nlatency is extremely low\nbandwidth is extremely high",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Across machines:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "data travels through network hardware\nswitches become involved\ncongestion may happen\nlatency increases",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So distributed inference systems become highly dependent on networking quality.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What networking is commonly used between servers?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Large inference clusters often use:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "InfiniBand ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "or advanced RDMA-capable networking.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "These technologies are optimized for:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "very high throughput\nlow latency\nefficient GPU communication",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is RDMA?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "RDMA means:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Remote Direct Memory Access ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The important idea is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "one machine can access memory on another machine\nwith minimal CPU involvement",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This helps reduce:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "latency\nCPU overhead\nunnecessary memory copying",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "which becomes very important at scale.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why does CPU involvement matter?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Suppose every GPU communication required:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "GPU → CPU → Network → CPU → GPU ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Then:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "CPUs become bottlenecks\nmemory copying increases\nlatency grows significantly",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "RDMA helps communication happen more directly.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is NCCL?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "At this point another important component appears.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "NCCL ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "pronounced:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Nickel ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "NCCL is NVIDIA’s communication library for multi-GPU systems.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It helps GPUs coordinate operations like:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "synchronization\ntensor exchange\nreductions\ncollective communication",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What are collective operations?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Suppose multiple GPUs each compute partial outputs.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Now they must combine results.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "GPU 1 → partial tensor\nGPU 2 → partial tensor\nGPU 3 → partial tensor\nGPU 4 → partial tensor ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "NCCL helps efficiently perform operations like:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "combine everything together ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "across GPUs.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is all-reduce?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "One very common communication pattern is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "all-reduce ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The idea is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "every GPU contributes data\ndata gets combined\nevery GPU receives the final combined result",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This is heavily used in:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "distributed training\ntensor parallel inference\nsynchronization operations",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why do communication patterns matter so much?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Because at scale:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "communication architecture\n=\nperformance architecture ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Two systems with:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "the same GPUs\nthe same model\nthe same software",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "can still perform very differently depending on:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "network topology\ninterconnect bandwidth\ncommunication overhead\nsynchronization efficiency",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What does a real cluster start looking like?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "At this point, inference systems start looking less like normal backend systems.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "And much more like:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "distributed supercomputing systems ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Because now we are coordinating:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "hundreds of GPUs\nacross many servers\nwith high-speed networking\nwhile maintaining low latency\nand keeping utilization high",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is the key intuition?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Tensor parallelism creates:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "heavy communication ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Pipeline parallelism creates:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "stage-to-stage communication ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Data parallelism creates:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "replicated serving systems ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "And networking becomes the foundation that allows all of this to function efficiently.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What becomes difficult at this stage?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Honestly, this is usually the stage where the mental model becomes harder.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Because now we are no longer only thinking about:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "transformers\ntensors\nbatching\ninference loops",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "We are also thinking about:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "cluster topology\nGPU placement\nnetworking hardware\nsynchronization overhead\ndistributed communication efficiency",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "And this is exactly why modern inference engineering starts overlapping heavily with:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "distributed systems engineering ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "What comes next?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "At this point, we now understand:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "replicas\ndistributed serving\nrequest routing\nGPU communication\nNVLink\nNCCL\nmulti-node inference systems",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "And honestly, the mental model has now shifted quite a bit.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "We are no longer thinking only about:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "“running a model”\nor “calling an API”",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "We are now thinking about:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "distributed GPU systems\nschedulers\ncommunication bottlenecks\nand large-scale inference infrastructure",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But there is still one extremely important piece missing.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Even with all this infrastructure:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "why does inference still become slow?\nwhy are GPUs sometimes underutilized?\nwhy is batching difficult during generation?\nand why do serving systems behave very differently during prompt processing vs token generation?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This leads to one of the most important runtime concepts in inference systems:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Prefill vs Decode ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "In the next part, we will explore:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "what prefill actually does\nwhat decode actually does\nwhy decode becomes sequential\nwhy GPU utilization changes dramatically\nwhy batching becomes difficult during generation\nand why modern serving systems focus so heavily on scheduler design",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Honestly, this is one of the key concepts needed before understanding:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "continuous batching\npaged attention\nand vLLM internals",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Because once prefill vs decode becomes intuitive, many modern inference optimizations suddenly start making much more sense.",
+      "type": "paragraph"
+    }
+  ],
+  "images": [],
+  "bodyHash": "2f19cc4c4dad12a597004379259bc2ed0f02301ff453d6620b18b1a4b89e56f0"
+}

@@ -1,0 +1,516 @@
+{
+  "id": "qvsve",
+  "title": "LLM Inference Challenges - Understanding Tensor Parallelism",
+  "author": "Anurag Mohan",
+  "date": "May 13, 2026",
+  "url": "https://www.linkedin.com/pulse/llm-inference-challenges-understanding-tensor-anurag-mohan-qvsve",
+  "blocks": [
+    {
+      "links": [
+        {
+          "text": "previous part",
+          "url": "https://www.linkedin.com/pulse/llm-inference-challenges-why-we-need-multiple-gpus-anurag-mohan-z7ede"
+        }
+      ],
+      "text": "In the previous part, we explored why a single GPU is often not enough. Sometimes the model itself does not fit into memory. Other times, even if it fits, one GPU cannot handle enough concurrent users.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That naturally leads to the next question. How do we actually use multiple GPUs?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "One important idea here is tensor parallelism. But before understanding tensor parallelism, it helps to first understand what a tensor actually is.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is a tensor?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The word sounds complicated, but the idea is actually simple. A tensor is just a way of organizing numbers.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Depending on how numbers are arranged, we give them different names.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A single number is called a scalar.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "5",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "A list of numbers is called a vector.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "[2, 5, 7]",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "A table of numbers with rows and columns is called a matrix.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "[\n [1, 2, 3],\n [4, 5, 6]\n]",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "A tensor is the general term that includes all of these.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "scalar → 0D tensor\nvector → 1D tensor\nmatrix → 2D tensor",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Anything with more dimensions is also called a tensor.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why do tensors matter in LLMs?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "LLMs operate almost entirely on tensors.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Words become numbers. Those numbers are arranged into vectors and matrices. Then the model continuously transforms these tensors during computation.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "embeddings are tensors\nactivations are tensors\nKV cache stores tensors\nweights are tensors",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Almost everything inside the model is represented this way.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What do weights look like?",
+      "type": "heading"
+    },
+    {
+      "links": [
+        {
+          "text": "Earlier",
+          "url": "https://www.linkedin.com/pulse/llm-inference-challenges-why-we-need-multiple-gpus-anurag-mohan-z7ede/?trackingId=rRvEQcz4SUOBbV%2BgDxWZVA%3D%3D#:~:text=are%20parameters%20and-,weights,-%3F"
+        }
+      ],
+      "text": "Earlier, we discussed parameters and weights. These weights are usually stored as matrices.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "4096 × 4096",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That means:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "4096 rows\n4096 columns\nmillions of numbers inside one tensor",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The model performs operations on these tensors repeatedly during inference.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why do we need tensor parallelism?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Suppose we have a very large model.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Inside the model, we may have weight matrices like:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "4096 × 4096",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That is roughly:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "≈ 16 million parameters",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "And this is just one matrix.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A full model contains many such matrices across many layers. Eventually, the model becomes too large for one GPU.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So the natural idea becomes:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Can we split these tensors across GPUs?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This leads to tensor parallelism.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What does splitting a tensor mean?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Suppose we have a matrix like this:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "[\n [ W W W W ]\n [ W W W W ]\n [ W W W W ]\n [ W W W W ]\n]",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Normally, one GPU stores the entire matrix.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "With tensor parallelism, we divide the matrix across GPUs.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "GPU 1:\n[\n [ W W ]\n [ W W ]\n [ W W ]\n [ W W ]\n]\n\nGPU 2:\n[\n [ W W ]\n [ W W ]\n [ W W ]\n [ W W ]\n]",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Now each GPU stores only part of the weights.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What happens during computation?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Suppose an input arrives.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Input → [ x1 x2 x3 x4 ]",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Normally:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "one GPU multiplies the full input with the full weight matrix\nand produces the output",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "With tensor parallelism:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "the same input is sent to multiple GPUs\neach GPU computes using only its portion of the weights",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "GPU 1 → partial computation\nGPU 2 → partial computation",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Each GPU produces part of the result. These partial results are then combined together.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What does this achieve?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Instead of one GPU handling the entire model, we now distribute the model across GPUs.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This helps in two ways:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "the model fits into memory\ncomputation is shared across GPUs",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Large models that previously could not run on one GPU now become possible.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Is the computation completely independent?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Not really.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "After each GPU computes its partial result:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "outputs must be combined\nGPUs must synchronize\ndata must move between GPUs",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So tensor parallelism introduces communication between GPUs.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why is communication important?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "If GPUs constantly exchange data:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "latency increases\nsynchronization overhead increases\nbandwidth becomes important",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So tensor parallelism is always a tradeoff:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "better memory scaling\nbut more communication cost",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Does tensor parallelism help with concurrent users?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Not directly.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The main goal of tensor parallelism is to make large models fit across GPUs.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "In some cases, distributing weights across GPUs can free up memory for:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "larger KV cache\nlarger batches\nmore active requests",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So it can indirectly improve concurrency.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But scaling to many users is usually solved differently. We will come back to that later.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What does this feel like intuitively?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Imagine solving a large math problem.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Without tensor parallelism:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "One person solves the entire problem",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "With tensor parallelism:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Multiple people solve different parts\nThen combine answers",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That is essentially what the GPUs are doing.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is the key idea?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Tensor parallelism does not split users. It does not split requests. It splits the tensors themselves.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Multiple GPUs collaborate to compute a single layer of the model.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What comes next?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Tensor parallelism helps when the model itself is too large.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But there is another way to split work across GPUs.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Instead of splitting tensors inside a layer, we can split the layers themselves.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This leads to pipeline parallelism.",
+      "type": "paragraph"
+    }
+  ],
+  "images": [],
+  "bodyHash": "1c31ddc23752406a2dd156a480f68a43d6b9ec85e4cc012552535005f2e2dc67"
+}

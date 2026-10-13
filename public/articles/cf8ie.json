@@ -1,0 +1,687 @@
+{
+  "id": "cf8ie",
+  "title": "Understanding LLM-D Autoscaling, Observability, and Workload Behavior on OKE",
+  "author": "Anurag Mohan",
+  "date": "August 6, 2026",
+  "url": "https://www.linkedin.com/pulse/understanding-llm-d-autoscaling-observability-workload-anurag-mohan-cf8ie",
+  "blocks": [
+    {
+      "links": [],
+      "text": "Understanding LLM-D Autoscaling, Observability, and Workload Behavior on OKE",
+      "type": "heading"
+    },
+    {
+      "links": [
+        {
+          "text": "Lab 4",
+          "url": "https://github.com/aruanurag/llm-inference-lab/tree/main/labs/04-llm-d-autoscaling-on-oke"
+        }
+      ],
+      "text": "Github : Lab 4",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What happens when an LLM inference service receives:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "longer prompts\nrepeated context\nlonger outputs\nmore concurrent users",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Do all of these workloads affect the system in the same way? And when performance starts degrading, should we simply add another replica based on CPU utilization? That is what I wanted to understand in Lab 4. In the previous lab, I deployed LLM-D with a CPU-based vLLM model server on an existing Oracle Kubernetes Engine cluster. Lab 4 extends that setup with:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Prometheus\nGrafana\nKEDA\nLLM-D demand metrics\nOKE Cluster Autoscaler\nrepeatable workload experiments",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The goal was not only to autoscale the deployment. The bigger goal was to make the inference system observable enough to understand why it should scale.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What was the main question behind this lab?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The main question was:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Can we scale an inference service\nbased on actual inference demand\ninstead of only infrastructure utilization?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Traditional application autoscaling often starts with CPU utilization. For example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "CPU above 70%\n→ add another pod",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That can be useful, but LLM inference has more direct signals:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How many requests are running?\nHow many requests are waiting?\nIs TTFT increasing?\nIs KV cache being reused?\nAre model servers running out of capacity?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "A model server may already have high active concurrency or user-visible queueing before an average CPU metric tells a useful story. So this lab intentionally used LLM-D EPP demand metrics as the primary autoscaling signals. The simplified architecture was:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Client / Benchmark Workload\n        ↓\nLLM-D EPP / Routing Layer\n        ↓\nCPU vLLM Model-Server Pods\n        ↓\nPrometheus collects metrics\n        ↓\nGrafana shows system behavior\n        ↓\nKEDA queries Prometheus\n        ↓\nGenerated HPA scales model pods\n        ↓\nIf a new pod cannot fit:\nOKE Cluster Autoscaler adds a node",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The important point is that this contains two different scaling layers.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "KEDA\n=\nscales model-server pods\n\nOKE Cluster Autoscaler\n=\nadds cluster nodes",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "KEDA can request another vLLM replica, but it cannot create CPU or memory capacity. OKE Cluster Autoscaler only becomes involved when Kubernetes has created a pod that cannot be scheduled on the existing nodes.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What observability stack did I use?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The lab installed a dedicated monitoring stack containing:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Prometheus through kube-prometheus-stack\nGrafana\nKEDA\nServiceMonitor-based metric discovery\nLLM-D Grafana dashboards: Grafana remained internal to the cluster. Instead of exposing it through a public ingress, the workbench opened a local kubectl port-forward connection:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "kubectl --context <context> -n llm-d-monitoring \\\n  port-forward service/llmd-grafana 3000:80",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This made the dashboards available on:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "http://127.0.0.1:3000",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The lab intentionally kept Grafana private and accessed it only through the local tunnel. which metrics did I watch? One of the biggest lessons was that inference performance cannot be understood through one metric. I watched:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Time to First Token\nInter-token latency\nEnd-to-end request latency\nRequests per second\nGenerated tokens per second\nPrompt-token throughput\nKV-cache hit rate\nKV-cache usage\nActive requests\nWaiting requests\nEPP queue depth\nReady and Pending replicas\nNode count",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Each metric describes a different part of the request lifecycle.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "TTFT\n=\nHow long before generation begins?\n\nInter-token latency\n=\nHow quickly tokens continue after the first token?\n\nEnd-to-end latency\n=\nHow long does the full request occupy the system?\n\nKV-cache hit rate\n=\nHow much prompt processing is being reused?\n\nQueue depth\n=\nHow much work cannot currently enter a backend?\n\nRunning requests\n=\nHow much active serving demand exists?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Looking at only one of them can lead to the wrong conclusion.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How did I keep the experiments meaningful?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The lab used five repeatable workload recipes. The important rule was:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Change one workload characteristic at a time.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Before the cache experiments, I restarted the model-server deployment to clear the in-memory prefix cache and reset cumulative counters. I then ran:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "1. Short unique prompts\n2. Long unique prompts\n3. Long shared-prefix prompts\n4. Long outputs\n5. Sustained concurrent traffic",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This made it easier to connect each workload change with the dashboard behavior. ",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Experiment 1 — What happens with short, unique prompts?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The first experiment established the baseline. It used:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "100 short prompts\nconcurrency 1\nmaximum output 128 tokens\nno intentional shared prefix ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The approximate endpoint-level results were:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Generated throughput: 41.5 tokens/sec\np95 TTFT: 144 ms\nApproximate ITL: 34 ms",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The dashboards showed:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "low TTFT\nstable inter-token latency\nalmost no queueing\nnear-zero prefix-cache hit rate\nlittle persistent KV-cache use after completion This became the control case. Short unique prompts require relatively little prefill work and provide almost nothing for prefix caching to reuse.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Experiment 2 — What changes with long, unique prompts?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The second experiment increased prompt length but intentionally kept every prompt unique. The approximate results were:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Generated throughput: 32.4 tokens/sec\np95 TTFT: 764 ms\nApproximate ITL: 36 ms",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "TTFT increased dramatically:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "144 ms\n→\n764 ms ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "But inter-token latency stayed close to the baseline:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "34 ms\n→\n36 ms",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This made the prefill/decode distinction visible. The model had much more prompt context to process before producing the first token. That increased TTFT. But once decoding started, the cadence between generated tokens remained comparatively stable. The lesson was:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Long input\nprimarily stresses prefill.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Experiment 3 — What changes when the long prefix is reused?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The third experiment used long prompts again, but this time every prompt shared the same large initial prefix. Only the final suffix changed. The approximate results were:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "KV-cache hit rate: 53%\nGenerated throughput: 39.9 tokens/sec\np95 TTFT: 172 ms\nApproximate ITL: 36.5 ms",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Compare the two long-prompt workloads:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Cold long unique:\np95 TTFT ≈ 764 ms\n\nWarm shared prefix:\np95 TTFT ≈ 172 ms",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The prompt was still long. But the model no longer needed to repeat all of the prefill computation. The shared KV state could be reused. Inter-token latency remained broadly stable because prefix caching mainly improves:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "prompt processing\nand\ntime to first token",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "It does not create the same dramatic improvement in decode speed. This is why prefix caching can be useful for:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "repeated system prompts\npolicy instructions\nRAG instruction blocks\nlong shared documents\nmulti-turn conversation history The first uncached request could still appear in p99 TTFT, but once the cache warmed, the following requests became much faster.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Experiment 4 — What happens when outputs become much longer?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The fourth experiment kept concurrency at one but increased the maximum output to approximately 512 tokens. The approximate results were:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "50 successful requests\nGenerated throughput: 41.7 tokens/sec\np95 TTFT: 146 ms\nApproximate ITL: 35.6 ms\np95 end-to-end latency: 16 seconds",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "TTFT and inter-token latency remained close to the original baseline. But the complete request took much longer. Why? Because each request occupied the model server for many more decode iterations. The model was not necessarily generating each token more slowly. It was simply generating many more tokens. The lesson was:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Long output\n=\nmore decode work\n+\nlonger request residence time ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This reduces completed requests per second and increases the chance of contention when multiple users arrive.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Experiment 5 — What changes when concurrency increases?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The final experiment used sustained mixed traffic with:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "concurrency 8\nmaximum output 128 tokens",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "At the captured moment, Grafana showed:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Running requests: 8\nWaiting requests: 0\n\nTTFT p50: approximately 112 ms\nTTFT p95: approximately 236 ms\nTTFT p99: approximately 247 ms\n\nITL p50: approximately 38 ms\nITL p95: approximately 50 ms\n\nRequest throughput: approximately 0.74 requests/sec\nKV-cache hit rate: approximately 52% ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Even without a persistently non-zero queue, the active-request count was high enough to request more capacity. This was an important observation:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Queue depth is not the only demand signal.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Eight active requests already represented enough concurrent work for KEDA to scale the deployment.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Which autoscaling metrics did KEDA use?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The KEDA policy used two LLM-D EPP metrics:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "llm_d_epp_flow_control_queue_size\n\nllm_d_epp_request_running",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The first measured requests waiting because backend capacity was unavailable. The second measured active in-flight requests. The default policy was:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Minimum replicas: 1\nMaximum replicas: 3\nQueue threshold: 1 per replica\nRunning-request threshold: 4 per replica\nPolling interval: 15 seconds\nScale-down stabilization: 5 minutes ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "KEDA evaluated both signals and used the larger desired replica calculation. The active-request calculation was:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Active requests = 8\n\nThreshold\n= 4 requests per replica\n\nDesired replicas\n= ceil(8 / 4)\n= 2",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "KEDA’s generated HPA therefore requested a second CPU vLLM pod. This was the pod-scaling event. But the cluster did not have enough available CPU and memory to schedule that pod. So the second replica stayed:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Pending",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That Pending pod was not a failed autoscaling result. It was the next signal in the scaling chain.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How did node scaling happen?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Once the pod was Pending because its resource requests could not fit, OKE Cluster Autoscaler had a legitimate reason to add capacity. The full sequence was:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "1. Concurrent traffic increases.\n\n2. LLM-D reports active requests\n   and/or queue depth.\n\n3. Prometheus stores the metrics.\n\n4. KEDA queries Prometheus.\n\n5. The generated HPA requests\n   another vLLM pod.\n\n6. Kubernetes creates the pod.\n\n7. The pod cannot fit\n   and remains Pending.\n\n8. OKE Cluster Autoscaler\n   adds a managed node.\n\n9. The pod moves:\n   Pending\n   → ContainerCreating\n   → Running\n   → Ready",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This distinction is important:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "KEDA responds to inference demand.\n\nOKE Cluster Autoscaler responds\nto unschedulable Kubernetes capacity demand.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "They solve two related but different problems. Why not scale nodes immediately? Because additional pods may already fit on existing nodes. If every pod scale-out directly created a new node, the cluster could add unnecessary infrastructure. Kubernetes first tries to place the new replica using available capacity. Only when the requested CPU and memory cannot fit does node autoscaling become necessary. So the correct sequence is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Demand\n→ Pod\n→ Scheduling decision\n→ Node, only when needed",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Why did the endpoint and Grafana show different values?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Another useful lesson was that the workbench and Grafana did not always report identical latency numbers. The workbench measured requests at the local OpenAI-compatible endpoint. That measurement included:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "router overhead\nnetwork overhead\nstreaming behavior\nclient-side timing",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The vLLM Grafana metrics were emitted closer to the model server. So both measurements were valid, but they represented different parts of the request path. The lesson was:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Before comparing two metrics,\nunderstand where each one is measured.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The same name does not always mean the same measurement boundary. What did this lab teach me? The first lesson was:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "TTFT and inter-token latency\ntell different stories.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Long prompts increased TTFT because they increased prefill work. They did not create the same increase in inter-token latency. The second lesson was:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Prefix caching primarily improves prefill.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The warm shared-prefix workload reduced TTFT significantly, while decode cadence remained relatively stable. The third lesson was:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Output length is an occupancy problem.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Long outputs keep requests inside the model server for longer, even when tokens continue arriving at a stable rate. The fourth lesson was:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Concurrency connects benchmarking\nto autoscaling.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "A system that looks healthy at concurrency one may behave very differently when eight requests are active. The fifth lesson was:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Autoscaling should use signals\nthat represent actual inference demand.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "CPU utilization remains useful for diagnosis, but active requests and queue depth are closer to the user-facing serving problem. And finally:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Pod scaling and node scaling\nmust be understood as one chain.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "A model-serving platform is not fully elastic if it can request a pod but cannot create the infrastructure required to run it.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is the biggest mental shift?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Before this lab, it was easy to think about autoscaling as:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Load increases\n→ Add more servers",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The real system is more layered:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Workload shape\nchanges inference behavior.\n\nInference behavior\nchanges TTFT, ITL, cache usage,\nqueueing, and active concurrency.\n\nInference metrics\ndrive pod scaling.\n\nUnschedulable pods\ndrive infrastructure scaling.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So autoscaling is not a separate infrastructure feature sitting outside inference. It is connected directly to:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "prefill\ndecode\nKV-cache reuse\nrequest residence time\nconcurrency\nrouting\ncapacity",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "What is the key intuition?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The simplest summary is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Prompt length changes prefill.\n\nShared context changes cache economics.\n\nOutput length changes decode occupancy.\n\nConcurrency changes the scaling story.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Lab 4 made these relationships visible on a real Kubernetes deployment. It also showed how:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "LLM-D\n+\nvLLM\n+\nPrometheus\n+\nGrafana\n+\nKEDA\n+\nOKE Cluster Autoscaler",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "can work together as one observable and demand-driven inference platform.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What comes next?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Now that the scaling sequence is visible, the next question becomes:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How do we turn these experiments\ninto an actual capacity plan?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That means connecting:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "prompt distribution\noutput distribution\nconcurrency\nTTFT targets\nreplica count\nnode size\nscale-up time\ncost",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Because autoscaling can react to demand. But good capacity planning decides how much warm capacity should already exist before that demand arrives.",
+      "type": "paragraph"
+    }
+  ],
+  "images": [
+    {
+      "alt": "Grafana baseline for short unique prompts: low first-token latency, zero prefix hits, one running request, and negligible queueing.",
+      "url": "https://media.licdn.com/dms/image/v2/D4E12AQHltFAgIsaXSw/article-inline_image-shrink_1000_1488/B4EZ_I_N0RJIAI-/0/1785783443166?e=1793232000&v=beta&t=xk55plsI3GF1JaPV0PksSblClEpARjexiaFanuJwHb0",
+      "localPath": "/article-images/cf8ie-1.png"
+    },
+    {
+      "alt": "Grafana long unique prompts: first-token latency increases while inter-token latency remains broadly stable and prefix hits remain zero.",
+      "url": "https://media.licdn.com/dms/image/v2/D4E12AQH76mESXxGYsA/article-inline_image-shrink_1000_1488/B4EZ_JAL65IsAI-/0/1785783698209?e=1793232000&v=beta&t=UdEpIKRnMZAENjbNkKXtoh4trtKgt7tYLXRUVJSoe1E",
+      "localPath": "/article-images/cf8ie-2.png"
+    },
+    {
+      "alt": "Grafana shared-prefix prompts: cache hit rate reaches 53.1% and first-token latency falls after cache warming.",
+      "url": "https://media.licdn.com/dms/image/v2/D4E12AQFwZvVKBHmfeQ/article-inline_image-shrink_1000_1488/B4EZ_JAjMCKQAQ-/0/1785783793218?e=1793232000&v=beta&t=OcMIZIFsbYpdf5H2bLA3NaX39gAuyuBDKlC6lfBmmhw",
+      "localPath": "/article-images/cf8ie-3.png"
+    },
+    {
+      "alt": "vLLM dashboard comparing end-to-end latency, prompt/generation throughput, inter-token latency, scheduler state, TTFT, and KV usage across the experiments.",
+      "url": "https://media.licdn.com/dms/image/v2/D4E12AQHYPP94BVn96Q/article-inline_image-shrink_1000_1488/B4EZ_JAuXJJUAI-/0/1785783838906?e=1793232000&v=beta&t=UHRFBLJNwXPnI7la9NgbKM3E75ciURD5Qh-6X6JIdLQ",
+      "localPath": "/article-images/cf8ie-4.png"
+    },
+    {
+      "alt": "Kubernetes pod listing: the existing CPU vLLM pod is Running while a second desired replica remains Pending due to scheduling capacity.",
+      "url": "https://media.licdn.com/dms/image/v2/D4E12AQEOyt7fAE71RQ/article-inline_image-shrink_1500_2232/B4EZ_JBDZVH8AQ-/0/1785783924531?e=1793232000&v=beta&t=xbfYeGrXR1FZU44FDOrL6h1m5aAs1bX_v9wiOauBqOI",
+      "localPath": "/article-images/cf8ie-5.png"
+    }
+  ],
+  "bodyHash": "e0c909dcee555487b30bdf4a8c04470814e83e159429e071daa75d5b6bbf3eda"
+}

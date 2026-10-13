@@ -1,0 +1,1536 @@
+{
+  "id": "oplvc",
+  "title": "Understanding Capacity Planning for LLM Inference",
+  "author": "Anurag Mohan",
+  "date": "August 11, 2026",
+  "url": "https://www.linkedin.com/pulse/understanding-capacity-planning-llm-inference-anurag-mohan-oplvc",
+  "blocks": [
+    {
+      "links": [
+        {
+          "text": "previous part",
+          "url": "https://www.linkedin.com/pulse/understanding-llm-d-autoscaling-observability-workload-anurag-mohan-cf8ie"
+        }
+      ],
+      "text": "In the previous part, I explored autoscaling, observability, and workload behavior using LLM-D, vLLM, Prometheus, Grafana, KEDA, and OKE Cluster Autoscaler.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The experiments made one thing very clear:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Prompt length changes prefill.\n\nShared context changes cache economics.\n\nOutput length changes decode occupancy.\n\nConcurrency changes the scaling story.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The lab also showed the complete scaling chain:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Inference demand\n→ more model-server pods\n→ Pending pod\n→ more cluster nodes\n→ additional serving capacity",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "But that led me to another question:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How much capacity should already exist\nbefore the traffic arrives?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Autoscaling can react to demand.",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "Understanding LLM-D Autoscaling, Observability, and Workload Behavior on OKE",
+          "url": "https://www.linkedin.com/pulse/understanding-llm-d-autoscaling-observability-workload-anurag-mohan-cf8ie"
+        }
+      ],
+      "text": "Capacity planning decides how much capacity should already be available while autoscaling reacts. That was the natural handoff from Understanding LLM-D Autoscaling, Observability, and Workload Behavior on OKE.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What did I initially think capacity planning meant?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "At first, I thought the calculation would be simple:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Expected traffic\n÷\nthroughput per replica\n=\nnumber of replicas",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "For example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Expected traffic = 3 requests/sec\n\nOne replica = 1 request/sec\n\nRequired replicas = 3",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That sounds reasonable.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But after the experiments in Part 22, this started feeling incomplete.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "One request may contain:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "50 input tokens\n+\n50 output tokens",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Another request may contain:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "8000 input tokens\n+\n500 output tokens",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Both count as:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "one request",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "But they create completely different amounts of work.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So capacity planning for LLM inference cannot begin with request count alone.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is capacity planning?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The mental model I am building is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Capacity Planning\n=\nunderstand the workload\n+\nmeasure safe serving capacity\n+\nestimate peak demand\n+\nkeep enough warm capacity\n+\nleave room for failures and scaling",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The word safe is important.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The goal is not to find the maximum amount of traffic the system can accept before it crashes.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The goal is to find how much traffic it can serve while still meeting the expected user experience.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is the difference between capacity planning and autoscaling?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Capacity planning answers:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How much capacity should already exist?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Autoscaling answers:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "When should we add or remove capacity?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "They work together, but they solve different problems.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A simplified flow is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Capacity Planning\n→ choose minimum warm replicas\n\nAutoscaling\n→ add replicas when demand grows\n\nCluster Autoscaling\n→ add nodes when replicas cannot fit",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "In my Lab 4 setup, KEDA could request another model-server pod.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But if the cluster did not have enough CPU or memory, that pod remained Pending until OKE Cluster Autoscaler added a node.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That entire process takes time.",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "Kubernetes",
+          "url": "https://kubernetes.io/docs/concepts/workloads/autoscaling/horizontal-pod-autoscale/"
+        }
+      ],
+      "text": "The Kubernetes Horizontal Pod Autoscaler itself runs as a periodic control loop rather than responding continuously; the default synchronization period is 15 seconds. After that decision, Kubernetes may still need to schedule a pod, provision a node, pull an image, load the model, and wait for readiness. (Kubernetes)",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So the new capacity does not appear instantly.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That is why some capacity must already be warm.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What does warm capacity mean?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Warm capacity means model-serving replicas that are:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "already running\nalready holding model weights\nalready connected to the router\nalready ready to accept requests",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "For example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Minimum replicas = 2\n\nCurrent demand needs only 1 replica\n\nSecond replica remains ready\nfor a burst or failure",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That second replica may look idle during quiet periods.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But it is also reducing the risk that users wait through the full scale-up process.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So warm capacity is not simply wasted capacity.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It is partly:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "latency protection\n+\nfailure protection\n+\nscale-up protection",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "What exactly are we planning capacity for?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "This was one of the biggest clarifications for me.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "We are not planning capacity for:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "a model",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "We are planning capacity for:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "a model\n+\na runtime\n+\na hardware configuration\n+\na workload profile\n+\na performance target",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The same model may have very different capacity depending on:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "CPU or GPU\nquantization\ntensor-parallel size\ncontext length\nbatching configuration\nprefix-cache behavior\ninput-token distribution\noutput-token distribution\nrequest concurrency",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So asking:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How many requests can this model handle?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "is still not enough.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The better question is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How many requests of this workload type\ncan this serving configuration handle\nwhile meeting this latency target?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "What is a workload profile?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "A workload profile describes the traffic the inference service receives.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The most useful dimensions appear to be:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "request arrival rate\nconcurrent requests\ninput-token length\noutput-token length\nprefix-cache reuse\ntraffic burstiness",
+      "type": "code"
+    },
+    {
+      "links": [
+        {
+          "text": "vLLM",
+          "url": "https://docs.vllm.ai/en/latest/cli/bench/serve/"
+        }
+      ],
+      "text": "These dimensions are also reflected in modern inference benchmarking tools. For example, vLLM’s serving benchmark supports controls for request rate, maximum concurrency, input length, output length, and burstiness. (vLLM)",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A useful profile may look like:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Request rate:\n2 requests/sec\n\nPrompt length:\np50 = 500 tokens\np95 = 4000 tokens\n\nOutput length:\np50 = 100 tokens\np95 = 500 tokens\n\nPrefix-cache hit rate:\napproximately 40%\n\nPeak concurrency:\n12 requests",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That tells us much more than:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "We expect 2 requests/sec.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Why can’t I use one throughput number?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Lab 4 made this especially visible.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "With short, unique prompts, I observed approximately:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Generated throughput: 41.5 tokens/sec\np95 TTFT: 144 ms",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "With long, unique prompts:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Generated throughput: 32.4 tokens/sec\np95 TTFT: 764 ms",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "With a long reusable prefix:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "KV-cache hit rate: 53%\nGenerated throughput: 39.9 tokens/sec\np95 TTFT: 172 ms",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "And with longer outputs:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Generated throughput: 41.7 tokens/sec\np95 TTFT: 146 ms\np95 end-to-end latency: 16 seconds",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The same model server produced very different user-facing behavior depending on the workload.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This means:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Tokens/sec alone\ndoes not describe capacity.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "It needs to be interpreted together with:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "TTFT\nITL\nrequest latency\nqueue depth\nconcurrency\ninput length\noutput length\ncache behavior",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "What should define acceptable capacity?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "This leads to Service Level Objectives, or SLOs.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "An example SLO might be:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "p95 TTFT < 500 ms\n\np95 ITL < 60 ms\n\nError rate < 1%",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "These are only example values.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The correct targets depend on the application.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For an interactive chatbot, TTFT and ITL may be very important.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For an offline batch summarization workload, total throughput may matter more.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For a coding agent, long context and repeated prefixes may dominate.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So capacity should be measured against the application’s actual goal.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is goodput?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "This helped me separate two ideas.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Throughput measures:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How much work completed?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Goodput measures:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How much work completed\nwhile still meeting the SLO?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "For example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "System throughput:\n2 requests/sec\n\nRequests meeting TTFT and ITL targets:\n1.5 requests/sec\n\nGoodput:\n1.5 requests/sec",
+      "type": "code"
+    },
+    {
+      "links": [
+        {
+          "text": "NVIDIA Docs",
+          "url": "https://docs.nvidia.com/deeplearning/triton-inference-server/user-guide/docs/perf_analyzer/genai-perf/docs/goodput.html"
+        }
+      ],
+      "text": "NVIDIA’s GenAI-Perf documentation defines goodput as the number of completed requests per second that meet configured service-level constraints such as TTFT or inter-token latency. (NVIDIA Docs)",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That means the replica’s real usable capacity is not necessarily its maximum throughput.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It is closer to:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "maximum sustainable goodput",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "How do we find the safe capacity of one replica?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The simplest approach I understand so far is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Fix the model, hardware, runtime configuration, and number of replicas.\nCreate a realistic workload profile.\nStart at a low request rate or concurrency.\nIncrease demand gradually.\nTrack TTFT, ITL, queueing, errors, memory, and throughput.\nFind the point where the SLO begins to degrade.\nChoose an operating point below that limit.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This gives us:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Safe capacity per replica\n=\nhighest sustained demand\nthat still meets the SLO\nwith enough operating headroom",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The objective is not to reach the largest possible number.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It is to identify the region where the system remains predictable.",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "NVIDIA Docs",
+          "url": "https://docs.nvidia.com/enterprise-reference-architectures/nim-llm-runai-vanilla-kubernetes/latest/performance-and-scale-methodology.html"
+        }
+      ],
+      "text": "Performance guidance for generative-AI serving follows this same general method: benchmark representative input and output lengths, increase concurrency, and identify the point where latency begins degrading beyond the acceptable target. (NVIDIA Docs)",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is the capacity knee?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "As load increases, performance may initially remain stable.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Concurrency 1:\np95 TTFT = 140 ms\n\nConcurrency 2:\np95 TTFT = 150 ms\n\nConcurrency 4:\np95 TTFT = 180 ms",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Then the system may reach a point where latency rises much faster:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Concurrency 6:\np95 TTFT = 300 ms\n\nConcurrency 8:\np95 TTFT = 700 ms\n\nConcurrency 10:\np95 TTFT = 1500 ms",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That sharp change is sometimes described as the knee of the curve.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Before the knee:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "the system absorbs more demand\nwithout severe degradation",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "After the knee:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "queueing grows\nlatency rises quickly\nthe system becomes less predictable",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Capacity planning should normally operate before that knee, not directly on it.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Did Lab 4 prove that one replica supports four requests?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "No.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This distinction is important.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "In Lab 4, the KEDA policy used:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Running-request threshold:\n4 per replica",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So when the system observed:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "8 active requests",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "the calculation became:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "ceil(8 / 4)\n=\n2 replicas",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That showed that the autoscaling policy worked.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It did not prove that four active requests were the true maximum or optimal capacity of one replica.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The value was a configured scaling target.",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "KEDA",
+          "url": "https://keda.sh/docs/2.20/reference/scaledobject-spec/"
+        }
+      ],
+      "text": "KEDA’s AverageValue metric type works in this way: it treats the target as the desired average metric value per replica and calculates the replica count from the total metric value. (KEDA)",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "To validate whether 4 is a good target, I would still need to benchmark:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "1 active request\n2 active requests\n4 active requests\n6 active requests\n8 active requests\n...",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Then observe where the selected TTFT and ITL targets begin to fail.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How are request rate and concurrency connected?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "A useful approximation is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Concurrency\n≈\nrequest arrival rate\n×\naverage request duration",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Suppose:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Arrival rate = 2 requests/sec\n\nAverage request duration = 5 seconds",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Then the system may have approximately:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "2 × 5\n=\n10 active requests",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This explains why output length matters so much.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Suppose the arrival rate stays the same, but responses become longer:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Before:\n2 requests/sec × 5 seconds\n= 10 active requests\n\nAfter:\n2 requests/sec × 15 seconds\n= 30 active requests",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Traffic did not increase in requests per second.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But active concurrency tripled because every request stayed in the system longer.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That creates:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "more decode work\nmore KV-cache occupancy\nmore active sequences\ngreater probability of queueing",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "How do we calculate the number of replicas?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Once safe capacity per replica is measured, the first estimate becomes:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Required replicas\n=\nceil(\npeak demand\n÷\nsafe capacity per replica\n)",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "For example, suppose a benchmark shows:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Safe goodput per replica:\n0.8 requests/sec\n\nExpected peak demand:\n2 requests/sec",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Then:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "ceil(2 / 0.8)\n=\nceil(2.5)\n=\n3 replicas",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "We can also calculate using validated active concurrency:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Required replicas\n=\nceil(\nexpected peak active requests\n÷\nsafe active requests per replica\n)",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Suppose:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Peak active requests = 10\n\nValidated safe active requests\nper replica = 4",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Then:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "ceil(10 / 4)\n=\n3 replicas",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "These are starting estimates.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "They do not yet include failures, bursts, or scale-up delay.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why do we need headroom?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Running at 100% of measured capacity leaves no room for variation.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Real traffic contains:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "long-tail prompts\nlonger-than-expected outputs\ncache misses\ntemporary traffic bursts\nreplica failures\nnode failures\nmodel reloads\nrouting imbalance\nforecasting errors",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So I now think about several types of headroom:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Performance headroom\n=\navoid operating at the capacity knee\n\nBurst headroom\n=\nabsorb short traffic spikes\n\nFailure headroom\n=\ncontinue serving when a replica fails\n\nScale-up headroom\n=\nserve traffic while new capacity starts",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The exact amount is a business and engineering decision.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "There is no universal percentage that works for every inference service.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is N+1 capacity?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "One simple availability policy is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Required for demand = N replicas\n\nKeep one additional replica = N + 1",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "For example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Normal peak requires 3 replicas.\n\nWarm capacity = 4 replicas.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "If one replica fails:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "3 replicas remain",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "and the expected peak workload can still be served.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But N+1 is only one policy.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For larger deployments, operators may plan for:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "one node failure\none availability-domain failure\nmultiple replica failures\nregional failover",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The capacity model should reflect the actual failure scenario the system needs to tolerate.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How do replicas translate into nodes?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Once the replica count is known, I still need to determine where those replicas will run.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A simplified calculation is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Pods per node\n=\nminimum of:\n\nallocatable CPU ÷ pod CPU request\n\nallocatable memory ÷ pod memory request\n\navailable accelerators ÷ accelerators per pod",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Then:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Required nodes\n=\nceil(\nrequired replicas\n÷\npods per node\n)",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Suppose one node can safely fit:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "2 model-server replicas",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "And warm capacity requires:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "5 replicas",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Then:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "ceil(5 / 2)\n=\n3 nodes",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This calculation should use allocatable resources, not the node’s full advertised resources.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Kubernetes, networking components, monitoring agents, and other system workloads also need capacity.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For GPU deployments, topology may become another constraint.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A replica may require:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "1 GPU\n4 GPUs using tensor parallelism\nor\nmultiple nodes",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So the scheduling unit may be much larger than one pod on one GPU.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How does scale-up time affect capacity?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Suppose the service currently has warm capacity for:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "1 request/sec",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Traffic suddenly rises to:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "2 requests/sec",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "And additional capacity takes:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "60 seconds",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "to become ready.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A simplified estimate of temporary backlog growth is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Backlog\n≈\n(incoming rate - warm service rate)\n×\nscale-up time",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "(2 - 1) requests/sec\n×\n60 seconds\n=\napproximately 60 queued requests",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This is a simplified model.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Real systems also have variable request duration, batching, and partial completions.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But it makes the basic risk visible.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Even if autoscaling eventually adds enough capacity, users arriving during that minute may already experience poor TTFT or timeouts.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How much warm capacity should we keep?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The answer depends partly on how much queueing the application can tolerate.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "An interactive assistant may need:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "more warm capacity\nfaster scale-up\nstricter TTFT protection",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "A batch-processing service may tolerate:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "more queueing\nslower scale-up\nhigher utilization",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The basic tradeoff is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "More warm capacity\n=\nhigher cost\n+\nlower latency risk\n\nLess warm capacity\n=\nlower idle cost\n+\ngreater scale-up and queueing risk",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Capacity planning is therefore not purely a performance calculation.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It is also a cost and reliability decision.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How do capacity planning and autoscaling fit together?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The mental model I now have is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Warm capacity\nhandles immediate expected demand.\n\nPod autoscaling\nhandles sustained demand growth.\n\nNode autoscaling\ncreates infrastructure for new pods.\n\nAdmission control\nprotects the service\nwhen demand exceeds all available capacity.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "These layers should not be treated as independent features.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "They are parts of one capacity system.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Can one model have multiple capacity profiles?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Yes.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This may be one of the most important lessons.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The same model can have different capacity profiles for:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Interactive chat\n\nLong-context RAG\n\nCoding assistants\n\nAgentic workflows\n\nOffline batch processing",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "For example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Interactive chat:\nshort prompts\nmedium outputs\nstrict TTFT\n\nRAG:\nlong prompts\nshort outputs\npossible prefix reuse\n\nCreative writing:\nshort prompts\nvery long outputs\ndecode-heavy\n\nDocument summarization:\nlong prompts\nlong outputs\nhigh total occupancy",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Trying to combine all of these into one average request can hide the real bottlenecks.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It may be better to create:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "separate workload classes\nseparate benchmark profiles\npossibly separate serving pools",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "What would a practical capacity-planning process look like?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The process I would follow now is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "1. Define workload classes.\n\n2. Measure prompt-length distributions.\n\n3. Measure output-length distributions.\n\n4. Measure arrival rate,\n   concurrency, and burstiness.\n\n5. Define TTFT, ITL,\n   error-rate, and throughput targets.\n\n6. Benchmark one replica\n   with realistic workloads.\n\n7. Find the SLO-safe capacity point.\n\n8. Forecast normal and peak demand.\n\n9. Calculate required replicas.\n\n10. Add burst, failure,\n    and scale-up headroom.\n\n11. Map replicas to nodes.\n\n12. Measure real pod and node\n    scale-up times.\n\n13. Run a full-system load test.\n\n14. Compare prediction\n    with production measurements.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The last step matters.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Capacity planning is not something we calculate once and finish.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The estimates should be compared with real behavior and adjusted continuously.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How does this change how I interpret Lab 4?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "During the concurrent workload, I observed approximately:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Running requests: 8\nWaiting requests: 0\n\np95 TTFT: 236 ms\np95 ITL: 50 ms\n\nRequest throughput:\n0.74 requests/sec",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "KEDA requested another replica because the configured threshold was:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "4 running requests per replica",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This was a successful autoscaling experiment.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But it was only one point on the performance curve.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "To turn that experiment into a real capacity plan, the next step would be:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Choose an SLO.\n\nHold the deployment at one replica.\n\nIncrease request rate gradually.\n\nRepeat across:\n- short unique prompts\n- long unique prompts\n- shared-prefix prompts\n- long outputs\n- realistic mixed traffic\n\nFind where p95 TTFT,\np95 ITL, queue depth,\nor errors cross the target.\n\nSet the scaling threshold\nbefore that point.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That would turn:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "4 active requests per replica",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "from a configured assumption into a measured operating target.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is the biggest mental shift?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Before exploring this, I thought capacity planning was mainly:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Peak requests\n÷\nmaximum throughput\n=\nreplicas",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Now the picture looks more like:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Workload shape\ndetermines per-request work.\n\nSLO\ndefines acceptable performance.\n\nBenchmarking\nfinds safe replica capacity.\n\nDemand forecasting\nestimates required replicas.\n\nScale-up time and failures\ndetermine headroom.\n\nCost\ninfluences how much capacity stays warm.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So the final number is not simply a hardware calculation.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It is the result of several connected decisions.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is the key intuition?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The simplest summary is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Benchmarking tells me\nwhat one replica can safely do.\n\nCapacity planning tells me\nhow many replicas should already exist.\n\nAutoscaling tells the system\nwhen to add or remove replicas.\n\nCluster autoscaling tells Kubernetes\nwhere those replicas can run.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "And the deeper lesson is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Capacity is not the maximum load\nthe system can survive.\n\nCapacity is the load\nthe system can serve reliably\nwhile meeting the user experience target.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "What comes next?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Now that the capacity-planning mental model is clearer, the next question becomes:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Which live metrics should trigger scaling\nbefore users experience a problem?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Should we scale on:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "active requests\nqueue depth\nTTFT\nITL\nKV-cache pressure\ntoken backlog\ngoodput",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "And which of these are early signals versus signals that tell us the system is already unhealthy?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That leads naturally to:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "LLM Inference Challenges ",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Understanding SLO-Driven Autoscaling for LLM Inference",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Because capacity planning decides the starting point.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The next challenge is making the system react early enough to protect that capacity plan when real traffic behaves differently from the forecast.",
+      "type": "paragraph"
+    }
+  ],
+  "images": [],
+  "bodyHash": "8db5b2bcbb9dc3750482abe204801ddf82d06fcc8ce65508e766df07446bb664"
+}

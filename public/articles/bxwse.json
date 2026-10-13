@@ -1,0 +1,742 @@
+{
+  "id": "bxwse",
+  "title": "From GPUs to NIM: Understanding NVIDIA’s LLM Inference Stack",
+  "author": "Anurag Mohan",
+  "date": "August 27, 2026",
+  "url": "https://www.linkedin.com/pulse/from-gpus-nim-understanding-nvidias-llm-inference-stack-anurag-mohan-bxwse",
+  "blocks": [
+    {
+      "links": [],
+      "text": "As I have been learning more about LLM inference, NVIDIA has kept appearing everywhere.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "At first, it was easy to put everything in one bucket: NVIDIA means GPUs. Then I started seeing terms like TensorRT-LLM, Triton, NIM, NVLink, NVSwitch, InfiniBand, DGX, and HGX. I knew they were all related to AI infrastructure, but I did not have a clear picture of how they fit together.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "More importantly, I did not understand why I should care about all of them while learning inference.",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "KV cache",
+          "url": "https://www.linkedin.com/pulse/inside-llm-inference-anurag-mohan-o0hke"
+        },
+        {
+          "text": "routing",
+          "url": "https://www.linkedin.com/pulse/llm-inference-challenges-understanding-distributed-serving-mohan-ehxof"
+        },
+        {
+          "text": "prefill/decode behavior",
+          "url": "https://www.linkedin.com/pulse/llm-inference-challenges-understanding-prefill-vs-decode-mohan-tl4fe"
+        },
+        {
+          "text": "batching",
+          "url": "https://www.linkedin.com/pulse/llm-inference-challenges-understanding-continuous-batching-mohan-i5bre"
+        },
+        {
+          "text": "distributed inference",
+          "url": "https://www.linkedin.com/pulse/llm-inference-challenges-understanding-distributed-serving-mohan-ehxof"
+        }
+      ],
+      "text": "After spending time with topics like KV cache, routing, prefill/decode behavior, batching, distributed inference, and hyperscaler infrastructure, the picture is becoming clearer. NVIDIA is not only providing the compute where an LLM runs. It has pieces across the path from a GPU inside a server to a model exposed as an API.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This article is my attempt to build that mental model.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The question I started with",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "When we say that a model is running on an NVIDIA GPU, what does that really tell us?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "It tells us something important about the compute, but it does not explain:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "- whether the model fits in memory;",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "- how multiple GPUs communicate;",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "- how multiple servers communicate;",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "- where the model is stored before it is loaded;",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "- how the model is optimized for inference; or",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "- how it becomes a service that an application can call.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That is the gap this stack fills.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The simplest way I now think about it is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "NVIDIA’s LLM inference stack goes from storage, to compute and memory, to GPU and cluster communication, to systems, to software, and finally to a deployable inference service.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "First, separate memory, storage, and communication",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "One source of confusion for me was treating terms such as HBM, NAND, NVLink, and InfiniBand as if they described competing kinds of memory. They do not.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Here is how I separate them:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "- GPU HBM is fast, volatile memory attached to a GPU. During inference, it holds the active model weights, KV cache, and intermediate data.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "- NAND or NVMe SSD is persistent flash storage. It stores model files, containers, checkpoints, and cached artifacts.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "- NVLink and NVSwitch are scale-up GPU interconnects. They move data between tightly connected GPUs.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "- InfiniBand, RoCE, and EFA are examples of scale-out cluster fabrics. They move data between servers or GPU nodes.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "HBM is where the active inference working set needs to live. NAND is slower, but it is persistent, much larger, and less expensive per unit of capacity. NVLink and InfiniBand do not store the model at all; they transport data between compute devices.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That distinction explains why the fastest technology cannot simply be used everywhere. HBM is expensive and capacity-limited. NVLink is designed for tightly coupled GPU domains and has physical, topology, power, and cost constraints. NAND provides durability. A scale-out network provides the reach and fan-out required to connect racks or entire clusters.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "1. GPUs: where the model runs",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The GPU is still the starting point.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "LLMs involve a huge amount of matrix multiplication. NVIDIA GPUs provide highly parallel compute, and Tensor Cores are designed to accelerate the lower-precision math commonly used for AI workloads.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But while looking at inference, I realized that compute is only one part of the story.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "An inference system also needs memory for the model weights and for the KV cache. The KV cache keeps growing as context length and concurrent requests increase. During decode, every new token needs to work with the model weights and the relevant cache again.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That gives us three different things to think about:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "- Compute capability helps process model operations quickly.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "- GPU memory capacity affects whether the weights and KV cache can fit.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "- Memory bandwidth affects how quickly data can be moved while generating tokens.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This connects directly to the prefill/decode split I wrote about earlier.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Prefill processes many input tokens together and can make very effective use of parallel compute. Decode generates one token at a time, so memory movement, scheduling, and cache behavior become much more visible. A GPU is not simply “fast” or “slow” for inference; the workload shape matters.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So, when I look at a GPU now, I do not only think about FLOPS. I also ask: How much memory does it have? What precision will the model use? How large can the KV cache become? Is this workload mainly prompt-heavy, generation-heavy, or both?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "One GPU may not be enough. A larger model may not fit on it, or a workload may need more throughput than one GPU can provide.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The immediate answer sounds simple: add more GPUs.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But then another question appears: how do those GPUs communicate?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "If a model is split across GPUs using tensor parallelism, the GPUs need to exchange information while processing the model. During token generation, that communication can happen repeatedly. If the communication path is slow, GPUs spend time waiting for one another.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This is where NVLink and NVSwitch come in.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "- NVLink is a high-bandwidth connection between GPUs.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "- NVSwitch expands this into a fabric that can connect multiple GPUs at high bandwidth.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The key insight for me was that multi-GPU inference is not just about adding compute. It is also about reducing the cost of coordination.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That is why two machines with the same number of GPUs can behave very differently for a large model. The topology and interconnect can matter just as much as the GPU count.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "NVLink has traditionally described scale-up communication within a tightly integrated multi-GPU system. Newer rack-scale designs, such as NVLink 72 memory fabrics, can extend that scale-up domain across multiple compute hosts in a rack. Even then, a broader scale-out network is still needed to connect multiple memory fabrics or racks.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "3. Networking: moving from one server to a cluster",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "NVLink and NVSwitch help GPUs collaborate inside a tightly connected system or memory fabric. But real inference platforms often extend beyond that domain.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "We may need more replicas to handle traffic. We may need model-parallel workers across nodes. Or we may decide to separate prefill and decode into different pools, which is one of the ideas I have been trying to understand through llm-d and disaggregated serving.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Now the network becomes part of the inference design.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "NVIDIA’s networking portfolio includes InfiniBand and Spectrum-X Ethernet for high-performance AI networking. There are also BlueField DPUs, which can offload infrastructure work related to networking, storage, and security.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "I do not think of these as “extra infrastructure” anymore. For distributed inference, they influence how effectively the system can move data, synchronize workers, and keep latency predictable under load.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The distinction that helped me was this:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "- Scale up: GPUs communicate inside one tightly connected system or memory fabric. The building blocks include NVLink, NVSwitch, and newer rack-scale NVLink fabrics such as NVLink 72.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "- Scale out: Servers, racks, or separate GPU memory fabrics communicate across a cluster. The building blocks can include InfiniBand, RoCE, Spectrum-X Ethernet, AWS EFA, and DPUs.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The phrase “GPU-to-GPU networking” is useful shorthand, but the remote GPUs are not normally joined by one giant direct cable. Traffic leaves a GPU through a high-speed network adapter. Technologies such as GPUDirect RDMA allow that adapter to move data directly between GPU memory and the network while avoiding unnecessary CPU and host-memory copies.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Hyperscalers do not all use the same scale-out fabric",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "I originally assumed that every large GPU cloud cluster must be using InfiniBand. That is not the case.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Microsoft Azure ND H100 v5",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Inside one VM, the GPUs communicate through NVLink. Across VMs, Azure uses NVIDIA Quantum-2 InfiniBand with GPUDirect RDMA.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "AWS P5 and P5e",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Inside one instance, the GPUs communicate through NVSwitch. Across instances, AWS uses its Elastic Fabric Adapter, or EFA, with GPUDirect RDMA.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "OCI H100-style compute clusters",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Inside one bare-metal node, the GPUs communicate through NVLink. Across nodes, OCI uses its RDMA cluster network with RoCEv2.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "OCI GB200 and GB300 memory-fabric designs",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Within a rack-scale GPU memory fabric, GPUs and hosts communicate through NVLink. Separate GPU memory fabrics can be connected through RoCE or InfiniBand, depending on the OCI shape and deployment.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The common architecture is not “every hyperscaler uses InfiniBand.” The common architecture is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "1. use the fastest local GPU fabric for scale-up;",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "2. use a high-performance RDMA-capable network for scale-out; and",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "3. make collective-communication libraries such as NCCL understand the topology.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "AWS exposes EFA rather than InfiniBand as its customer-facing interconnect for P5 clusters. Azure uses InfiniBand on specific high-end ND offerings, but not every Azure GPU VM supports it. OCI has historically emphasized a custom RoCEv2 cluster network for its GPU Superclusters, while newer GB200 shape variants document both InfiniBand and RoCEv2 options.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This is also why large-scale inference architecture becomes more interesting than simply choosing the biggest possible GPU.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "4. HGX and DGX: from components to actual AI systems",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Another thing I initially mixed up was GPUs, HGX, and DGX.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The distinction that now makes sense to me is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "NVIDIA GPU: the accelerator engine",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "NVIDIA supplies the compute device that performs the model operations and holds the active data in GPU memory.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "NVIDIA HGX: the multi-GPU platform",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "HGX combines GPUs, NVLink or NVSwitch, CPUs, networking, and an optimized software stack into a system architecture. OEMs, ODMs, NVIDIA partners, and cloud providers can use that platform to build AI servers.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "NVIDIA DGX: NVIDIA’s integrated AI system",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "DGX packages the hardware with optimized software, management, support, and reference architectures such as BasePOD and SuperPOD. NVIDIA delivers it as an integrated solution rather than only supplying the underlying platform design.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Hyperscaler infrastructure: the complete cloud environment",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "AWS, Azure, OCI, and other providers combine racks of GPU systems with cluster networking, storage, scheduling, security, tenant isolation, and cloud operations.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A rough analogy is that HGX is the high-performance platform or chassis design, while DGX is NVIDIA’s fully assembled and supported vehicle. A hyperscaler then builds the roads, fleet-management system, storage depots, and dispatch layer around thousands of those compute engines.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Hyperscalers may use HGX-based systems, other NVIDIA reference designs, or their own custom server designs. They do not have to expose the underlying system as a product called “HGX” or “DGX.” For example, AWS exposes P5 instances, Azure exposes ND-series VMs, and OCI exposes bare-metal GPU shapes and Superclusters. OCI also explicitly lists HGX B200 among its infrastructure options.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "DGX is therefore part of the infrastructure landscape, but it is not a mandatory ingredient in every cloud GPU service. A provider might offer DGX Cloud or operate DGX-based infrastructure, while its native GPU instances remain cloud-specific products.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This matters because a production inference platform is a system, not a collection of GPU cards.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Power and cooling, GPU topology, drivers, firmware, storage paths, network design, and operational support all affect what the system can actually deliver. This is why an inference benchmark should never be read as a comparison of GPU names alone.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The model, precision, context length, runtime, batching policy, and full system configuration all contribute to the result.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "5. CUDA, TensorRT-LLM, and Triton: the software layer",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Hardware is useful only when software can use it efficiently.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "At the base is CUDA, NVIDIA’s software platform for GPU-accelerated computing. Frameworks and inference engines build on top of it to use the GPU.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For LLM inference, TensorRT-LLM is the name I wanted to understand more. It is an open-source library focused on optimizing LLM inference on NVIDIA GPUs. It includes capabilities around optimized kernels, quantization, KV-cache management, parallelism, and decoding optimizations.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Then there is Triton Inference Server. I think of Triton as the serving layer: it helps expose models as endpoints, manage concurrent requests and batching, and surface operational metrics. TensorRT-LLM can be deployed with Triton as a backend.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The roles become clearer when I describe them this way:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "- CUDA helps software use the GPU.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "- TensorRT-LLM helps an LLM run efficiently on the GPU.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "- Triton helps serve that model in a more production-oriented way.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This is not the only inference path. Tools such as vLLM and SGLang are also important in the broader ecosystem. But this separation helped me understand that an optimized model runtime and an inference server solve different parts of the same problem.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "6. NIM: moving closer to a deployable service",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Finally, there is NVIDIA NIM.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "NIM packages optimized model-serving software into deployable microservices. It does not make hardware, memory, networking, or inference fundamentals disappear. Those layers still determine what performance is possible.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What NIM changes is the amount of assembly required to get to a supported, optimized service. Instead of putting together every runtime, container, dependency, and serving component ourselves, we can start with a packaged microservice for a model or AI capability.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That is why NIM feels particularly relevant to LLMOps.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It shifts part of the problem from How do I build the serving stack from scratch? to questions such as:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "- How do I deploy it in my environment?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "- How do I configure it for my traffic pattern?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "- How do I monitor, secure, scale, and integrate it?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "- When do I use a packaged path, and when do I need more control over the runtime?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For containerized and Kubernetes-based deployments, the surrounding tooling matters as well. The NVIDIA Container Toolkit, for example, enables containers to use GPUs. That may sound like a small implementation detail, but it is one of the pieces that connects a GPU-powered model server to a real deployment workflow.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "NIM and Triton belong in the same general serving layer, but they are not simply two consecutive mandatory boxes in every deployment. Triton is an inference server that can host TensorRT-LLM and other backends. NIM is a packaged microservice approach that selects and assembles optimized serving components for a supported model or capability.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "7. What actually happens when this is deployed",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The deployment path becomes easier to visualize as a movement from cold, durable storage to hot, local GPU memory:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "1. The model begins in a model registry or object-storage service.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "2. A local NVMe or NAND cache may keep a nearby copy for faster loading.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "3. The model weights are loaded into GPU HBM, where the active KV cache also lives.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "4. NVLink or NVSwitch coordinates work inside the local scale-up domain.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "5. InfiniBand, RoCE, Spectrum-X, or EFA coordinates work across nodes when distributed execution is required.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "6. NIM, Triton, or another serving layer exposes the running model through an API.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "When a serving replica starts, it loads the model from durable storage, possibly through a local NVMe cache, into GPU memory. During inference, the weights and active KV cache stay in GPU memory because returning to NAND for each token would be far too slow.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The way the workload is distributed then depends on the model and traffic pattern:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "- Independent replicas: Each worker has its own copy of the model and serves different requests. This is often the simplest way to increase throughput.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "- Tensor or model parallelism: One request uses multiple GPUs because the model is too large or because lower latency requires more aggregate compute. NVLink is especially valuable here.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "- Multi-node parallelism: A model or expert set extends across servers, so the scale-out RDMA fabric becomes part of the token-generation path.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "- Disaggregated prefill and decode: Prompt processing and token generation run in different pools. KV-cache state or related metadata may need to move between those pools.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Request routing also matters. Once a worker has created a request’s KV cache, keeping subsequent decode work on that worker avoids moving or rebuilding that state unnecessarily.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The updated mental model I am keeping",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "This is the picture I am taking forward:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "NAND, NVMe, object storage, and file systems store models durably. ",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "GPU HBM holds the active weights and KV cache. ",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "GPU compute and memory bandwidth determine how efficiently tokens can be generated. ",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "NVLink and NVSwitch determine how well GPUs collaborate within a tightly connected scale-up domain. ",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "InfiniBand, RoCE, Spectrum-X, or EFA determine how systems collaborate across a scale-out cluster. ",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "HGX provides a multi-GPU platform that partners and hyperscalers can build into servers. ",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "DGX packages NVIDIA hardware, software, management, and support into an integrated system. ",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "CUDA and TensorRT-LLM determine how effectively software uses the hardware. ",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Triton and NIM help turn those capabilities into a deployable inference service.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The more I learn about inference, the more I see that “run the model on a GPU” hides a lot of meaningful decisions.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "NVIDIA is a big part of that picture not only because of its GPUs, but because it has offerings across the entire path—from the hardware that generates tokens to the software and infrastructure that help serve them at scale. The hyperscalers then combine those NVIDIA building blocks with their own network fabrics, storage systems, schedulers, and cloud operating models.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "My next step is to explore some of these pieces more deeply, especially TensorRT-LLM, NIM, Kubernetes-based serving, and how request routing changes when prefill and decode are separated. That should also make the trade-offs between an opinionated packaged deployment and a more customizable open-source stack much easier to understand.",
+      "type": "paragraph"
+    }
+  ],
+  "images": [],
+  "bodyHash": "bab6e00eb843c440932168682265bb3d13c1a62d699be26682457e6c79258293"
+}

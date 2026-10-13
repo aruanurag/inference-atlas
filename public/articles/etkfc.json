@@ -1,0 +1,426 @@
+{
+  "id": "etkfc",
+  "title": "The Best Model Router May Not Be the Best Conversation Router",
+  "author": "Anurag Mohan",
+  "date": "September 7, 2026",
+  "url": "https://www.linkedin.com/pulse/best-model-router-may-conversation-anurag-mohan-etkfc",
+  "blocks": [
+    {
+      "links": [],
+      "text": "LLM Inference Challenges: The Best Model Router May Not Be the Best Conversation Router",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "I have been writing about routing at different layers of LLM inference: routing requests to the right replica, routing based on KV cache locality, and now routing across models or providers.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "They sound similar, but they solve different problems.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "An inference router may decide where a request should run so that it gets the best latency, capacity, or cache reuse. A model router may decide which model should answer based on quality, cost, capability, or availability.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Both decisions influence the final user experience.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But there is an important complication when the application is conversational: the next user message is not always a completely new request. It may be continuing computation that the system has already paid for.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That is where model routing becomes much more than choosing the cheapest or most capable model for a prompt.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The simple routing mental model",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "At first, model routing feels straightforward:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A request arrives, the router selects the best model, and the model generates a response.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This works well for independent requests.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For example, a router could send a coding task to one model, a short summary to a smaller model, and a complex reasoning task to another. If every request starts fresh, the router has considerable freedom to optimize each decision.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But a multi-turn conversation changes the unit of work.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Imagine that a user has already shared a long document, several code snippets, and detailed instructions with an assistant. The first turn is handled by a larger model. On the next turn, the user asks:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Can you make the introduction shorter?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A stateless model router may decide that a smaller, less expensive model is enough for this specific task.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That sounds efficient. But the smaller model has not processed the earlier conversation. It does not have the work already completed by the first model.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It has to start again.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "KV cache is where the earlier work lives",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "During prefill, the model processes the input prompt and creates attention keys and values for the tokens it has already seen. This is the KV cache.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "When the model continues generating, it can reuse that cached state instead of recalculating attention over the entire prior context. This is one reason a warm continuation can respond much faster than a cold request with the same conversation history.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The important detail is that KV cache is not a universal conversation cache.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "In most serving environments, it is tied to:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The exact model and model version\nThe model architecture and configuration\nThe token sequence and positional state\nOften, the specific replica or GPU that processed the request",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A cache created by one model cannot normally be reused by a different model. Even if the next request goes to the same model, the cache may not be available if it lands on a different replica.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Some inference systems can transfer or externalize KV cache, which is useful. But that introduces its own trade-offs: network movement, memory management, cache lookup, scheduling, and failure handling.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So a model-routing decision can turn a warm continuation into a cold prefill.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Request routing versus conversation routing",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "This distinction helped me think about model routing more clearly.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Request routing asks:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Which model is best for this input?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Conversation routing asks:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Where should this turn go, considering the state and computation already created by earlier turns?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The first question is important for independent workloads. The second becomes important when a user is working through a longer interaction.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This does not mean model routing is a bad idea for chat applications. It means the router needs more context than only the current prompt.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "If it optimizes each turn independently, it may accidentally create:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Repeated prefill work\nHigher time to first token\nHigher token cost\nMore variable latency across a conversation\nDifferent response style or behavior between turns",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Session affinity helps, but it creates another trade-off",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "One answer is session affinity.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Instead of treating every request as independent, the system tries to send follow-up turns from the same conversation back to the model or replica that handled the earlier turn.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "There are two useful ways to think about this:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Model affinity keeps the conversation on the same model.\nReplica affinity keeps the conversation on the same model instance or replica, where its KV cache is more likely to be local.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Replica affinity can reduce repeated prefill work and improve time to first token. But it also makes load balancing harder.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A very active conversation may continue to send work to one replica while other replicas have capacity. And if that replica fails, its local cache may disappear, forcing the conversation to move and start cold anyway.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So affinity is not simply something to enable everywhere. It is a routing policy with real benefits and costs.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Cache-aware routing adds another signal",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "A cache-aware router does not only ask which model has the right capability. It also considers where useful context may already exist.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Its decision can include:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Model quality for the task\nQueue time and available capacity\nCost per request or token\nCache residency or prefix-cache hit probability\nSession ownership\nLatency targets\nWhether the request is new work or a continuation",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "These signals will not always agree.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The best model for a task may be overloaded. The least busy replica may not have the cache. The cheapest model may require a full prefill of a very long conversation.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That means the best model-selection decision is not always the best end-to-end routing decision.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Different workload shapes need different policies",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "A one-shot RAG question can often benefit from flexible per-request routing. The retrieved context may be different for every question, and the router can optimize for task complexity, latency, or cost.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But a multi-turn RAG assistant is different. If the user keeps asking follow-up questions about the same documents, preserving the active context may matter more than selecting a new model for every turn.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The same is true for agentic systems.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A planning conversation may benefit from affinity because it builds on earlier reasoning and context. An isolated classification, extraction, or tool-use step may be safe to route independently to a smaller specialized model.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So the important question is not whether something is “RAG,” “chat,” or “an agent.”",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The real question is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Does this request depend on state that the system has already paid to compute?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A hybrid approach is probably the practical answer",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "A fully stateless router has maximum flexibility, but it can lose useful cache locality. Permanent stickiness preserves context, but it can reduce load-balancing flexibility.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A hybrid policy feels more realistic.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For example, a system could:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Select the best model for the first turn.\nPrefer the same model or replica for follow-up turns.\nUse cache locality as a strong routing signal, not an absolute rule.\nReroute when there is a failure, overload, context reset, task change, or a meaningful quality requirement.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This preserves the value of model routing without assuming that every request begins from zero.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It also makes conversation boundaries important. A user moving to a completely different task may be a good point to reconsider the model. A user asking another question about the same document or codebase may be a reason to preserve affinity.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What should we measure?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "If a router is making cache-aware decisions, raw throughput is not enough.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "I would want to measure:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Time to first token for warm versus cold turns\nPrefill tokens recomputed per conversation\nCache-hit and cache-transfer rates\nP95 latency as conversations become longer\nSession migration rate\nLoad imbalance across replicas\nGoodput: how many requests actually meet the intended latency target",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A routing policy can look efficient in tokens per second but still produce a poor user experience if it repeatedly turns warm conversations into cold requests.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That is where goodput becomes more useful than raw throughput. The system is not successful only because it generated many tokens. It is successful when it delivers useful responses within the experience users expect.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The routing decision influences everything after it",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "This topic changed how I think about model routing.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A router is not simply choosing a model. It is influencing the rest of the inference path:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Whether prefill work is reused or repeated\nWhere KV cache needs to live\nHow evenly replicas can be loaded\nHow much tail latency a conversation experiences\nWhether the system optimizes one request or the full interaction",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The first question for a router should not always be:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Which model should answer this request?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Sometimes it should be:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Is this request continuing work that the system has already done?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The best model router may not be the best conversation router.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "And the best inference system may be the one that knows when not to forget the computation it has already paid for.",
+      "type": "paragraph"
+    }
+  ],
+  "images": [],
+  "bodyHash": "5371c790dad2da821d06020be91b6d0ed9997eb757919d1b340d2dbd8525113e"
+}

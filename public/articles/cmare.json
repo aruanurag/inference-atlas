@@ -1,0 +1,566 @@
+{
+  "id": "cmare",
+  "title": "LLM Inference Challenges (Part 3)",
+  "author": "Anurag Mohan",
+  "date": "May 1, 2026",
+  "url": "https://www.linkedin.com/pulse/llm-inference-challenges-part-3-anurag-mohan-cmare",
+  "blocks": [
+    {
+      "links": [],
+      "text": "GPU Utilization and Model Overhead",
+      "type": "heading"
+    },
+    {
+      "links": [
+        {
+          "text": "Part 2",
+          "url": "https://www.linkedin.com/pulse/llm-inference-challenges-memory-fragmentation-duplicate-anurag-mohan-8bjge"
+        }
+      ],
+      "text": "In Part 2, we explored memory-related challenges like fragmentation and duplicate computation.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "At this point, it feels like we’ve handled most of the system issues. But two things still feel off:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The GPU still doesn’t seem fully utilized\nKV cache is still surprisingly large",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Let’s walk through both of these the same way—as they naturally come up when trying to understand the system.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Low GPU Utilization",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "We know that token generation is sequential. Each token depends on the previous one.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That raises an obvious thought:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "If one request is small, why not run many of them in parallel?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why not just batch requests?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Let’s say a GPU can handle 100 units of work.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "One request only uses 5 units.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So naturally, we think:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why not run 20 requests together and fully utilize the GPU?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This is exactly what batching tries to do.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Where batching starts to break",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Batching works well when all requests are similar.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But in real systems:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Requests arrive at different times\nRequests have different lengths\nSome finish early, others run longer",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Step 1: User A, User B, User C start together",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Step 2: User A finishes early User B and C are still running",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Now the batch is no longer full.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The GPU starts becoming underutilized again.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Another issue with batching",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Traditional batching often waits for a batch to fill before starting.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This introduces latency:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "New requests have to wait\nGPU sits idle during that wait",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Continuous Batching",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "This leads to a better idea.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Instead of fixed batches, we allow requests to come and go continuously.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How it works",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "At any point in time:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Running requests continue\nFinished requests are removed\nNew requests are added immediately",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Step 1: User A, User B running",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Step 2: User A finishes User C joins immediately",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Step 3: User B finishes User D joins",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why this works better",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "No waiting for batch formation\nNo wasted GPU slots\nWork is always flowing",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Intuition",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Batching is like waiting for a bus to fill up before leaving.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Continuous batching is like a metro system:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "People get on and off continuously\nThe system never stops",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Large Model Overhead",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Even after solving scheduling and memory layout, KV cache still feels large.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This leads to a deeper question:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Where is this extra memory coming from?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Understanding attention heads and layers",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "We already know:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For each token and each layer, we store key and value vectors.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But there’s more structure inside a layer.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Each layer has multiple attention heads.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What does that mean?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Instead of storing one key/value pair per token, we store one per head.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "If a model has 32 heads:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Head 1 → Key₁, Value₁ Head 2 → Key₂, Value₂ ... Head 32 → Key₃₂, Value₃₂",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So for one token, we are storing 32 versions of key/value.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why do we need multiple heads?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Each head captures a different type of relationship in the data.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "You can think of it as:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "One head focusing on syntax\nAnother on relationships\nAnother on context",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "They provide diversity in how the model understands the sequence.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The problem",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "This diversity comes at a cost.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Memory now scales with:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "number of tokens\nnumber of layers\nnumber of heads",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So larger models (with more heads) create much larger KV caches.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "MQA (Multi-Query Attention)",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "This leads to a natural question:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Do we really need separate key/value for every head?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "MQA says: not necessarily.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What MQA does",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Keep multiple query heads\nShare a single key and value across all heads",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Before",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Q1...Q32 K1...K32 V1...V32",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "After",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Q1...Q32 K (shared) V (shared)",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why wasn’t this done originally?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Because separate key/value per head gives more flexibility.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Each head can focus on different aspects independently.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Trade-off",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "MQA reduces memory significantly, but:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Heads lose some independence\nModel expressiveness can slightly reduce",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Intuition",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Originally:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Each head had its own notebook",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "With MQA:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "All heads share one notebook",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "GQA (Grouped Query Attention)",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "MQA works well, but sometimes it is too aggressive.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So the next idea is to find a middle ground.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What GQA does",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Instead of sharing across all heads, we share within groups.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Example",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "32 heads grouped into 4 per group:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Q1–Q4 → KV1 Q5–Q8 → KV2 ... Q29–Q32 → KV8",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Trade-off",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Better memory efficiency than standard attention\nBetter quality than MQA",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Intuition",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Standard: everyone has their own notebook\nMQA: everyone shares one notebook\nGQA: small groups share notebooks",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Putting It All Together",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "At this point, the system-level picture is clearer:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Continuous batching improves how we use compute\nMQA and GQA reduce how much memory the model needs",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What Comes Next",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "So far, we have focused on single-node inference optimization.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The next natural question is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What happens when a single GPU is not enough?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "In the next part, we’ll look at scaling inference across multiple GPUs and systems.",
+      "type": "paragraph"
+    }
+  ],
+  "images": [],
+  "bodyHash": "9555da19b80444ee3b536a852b18106c74c0d6792995aa78d4e77c004a24dcc0"
+}

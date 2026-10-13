@@ -1,0 +1,596 @@
+{
+  "id": "8bjge",
+  "title": "LLM Inference Challenges: Memory, Fragmentation, Duplicate Work",
+  "author": "Anurag Mohan",
+  "date": "April 30, 2026",
+  "url": "https://www.linkedin.com/pulse/llm-inference-challenges-memory-fragmentation-duplicate-anurag-mohan-8bjge",
+  "blocks": [
+    {
+      "links": [
+        {
+          "text": "Part 1,",
+          "url": "https://www.linkedin.com/pulse/understanding-kv-caching-llm-inference-practical-intuitive-mohan-lcdee"
+        }
+      ],
+      "text": "In Part 1, we understood how KV caching makes generation fast by avoiding repeated computation.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A natural next question is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "If KV caching improves speed, what problems does it introduce?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "At a high level, four issues show up:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Memory explosion\nFragmentation\nDuplicate computation\nLow GPU utilization (we’ll cover this and large model overhead in the next part)",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Let’s go step by step and build intuition the same way.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Memory Explosion",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "If KV caching avoids recomputation, it does so by storing everything.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For every token and every layer (and in practice, for every attention head), key and value vectors are stored. As tokens grow, memory grows.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This leads to the first real problem: memory explosion.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How do we fix memory explosion?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Three common approaches are used:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Paged attention\nQuantization\nOffloading",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Let’s go one by one.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Paged Attention (Blocks)",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "To really understand why paged attention is needed, it helps to walk through a slightly more detailed example.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Without Blocks (Continuous Memory Requirement)",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Assume GPU memory is arranged like this (each box is a unit of memory):",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "[A][A][A][B][B][B][C][C][C][ ]",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "User A uses 3 units\nUser B uses 3 units\nUser C uses 3 units",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Now suppose User B finishes:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "[A][A][A][ ][ ][ ][C][C][C][ ]",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "We now have free memory, but it is split into two parts:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "3 units in the middle\n1 unit at the end",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Now a new request (User D) arrives and needs 4 units.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Even though we have 4 units total, they are not continuous:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "[ ][ ][ ] and [ ]",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So User D cannot be allocated.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This is fragmentation.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "With Blocks (Paged Attention)",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Now instead of requiring one continuous chunk, we divide memory into fixed-size blocks.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Each request is allowed to use multiple blocks, even if they are not next to each other.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Let’s reuse the same scenario.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "After User B finishes:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "[A][A][A][ ][ ][ ][C][C][C][ ]",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Now User D needs 4 blocks.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "With paged attention, we can allocate any 4 free blocks, even if they are scattered:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "[A][A][A][D][D][D][C][C][C][D]",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Here, User D is using:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "3 blocks from the middle\n1 block from the end",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But how does the model know the order?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "This is the key idea.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Even though blocks are scattered physically, the system keeps a mapping like:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "User D → Block 4, Block 5, Block 6, Block 10",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This mapping is stored in something like a block table.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So when the model reads the sequence, it follows the logical order, not the physical layout.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why this fixes the problem",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "We no longer require continuous memory\nAny free block can be reused\nMemory gaps no longer cause allocation failures",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This makes memory usage much more efficient and scalable.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Quantization",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Another way to reduce memory is to store numbers in lower precision.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Instead of storing:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "0.123456",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "we store:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "0.12",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This slightly reduces precision, but models are generally robust to this noise.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The benefit is straightforward:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "less memory per value\nmore tokens fit in GPU memory",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Offloading",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "If memory is still not enough, part of the KV cache can be moved out of GPU memory.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Typically:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "GPU memory → fast but limited\nCPU memory → slower but much larger",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So active data stays on GPU, and less active data moves to CPU.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Downsides of Offloading",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Offloading is useful, but it is not ideal in all cases.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Data transfer between CPU and GPU is slow\nIf data is needed frequently, performance drops\nReal-time systems may not tolerate this latency",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So offloading is best when:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "data is not accessed frequently\nmemory is the main bottleneck",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Fragmentation",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Even if total memory is sufficient, allocation can still fail because memory is not arranged properly.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "[A][A][A][ ][ ][ ][C][C][C][ ]",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This is fragmentation—memory exists, but not in the shape required.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Paged attention solves this as well.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Since memory is divided into blocks, requests no longer require continuous space. Blocks can be reused and placed anywhere.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How does the GPU know where blocks are?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The system uses a mapping table (often called a block table).",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This table maps:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "logical token positions → physical memory blocks",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So even if blocks are scattered, the model reads them as if they were continuous.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Duplicate Computation",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "KV caching works well within a single request, but across requests, the same work can still be repeated.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "User 1: \"Answer clearly: What is AI?\" User 2: \"Answer clearly: What is ML?\"",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Both share the prefix:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "\"Answer clearly:\"",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Without optimization:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "the prefix is computed twice\nKV cache is duplicated",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Prefix Caching",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Prefix caching reuses KV cache for identical prefixes across requests. Instead of recomputing the shared prefix:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "compute it once\nreuse it for other requests with the same prefix",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This reduces computation, improves time to first token, and avoids duplicating memory.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "More detailed examples",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "1) Simple shared prefix",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "User 1: \"Explain transformers in simple terms\" User 2: \"Explain transformers with examples\"",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Shared prefix: \"Explain transformers\"",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Without prefix caching: the prefix is computed twice and stored twice.\nWith prefix caching: compute the prefix once, reuse it, and only compute the differing suffixes.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "2) System prompt (very common)",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "\"You are a helpful assistant. Answer clearly and concisely.\"",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Without prefix caching: recompute this for every request.\nWith prefix caching: compute once and reuse across users.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "3) Retrieval (RAG) with large context",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "\"Answer based on this document: \"",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "User 1: \"... What is section 1?\" User 2: \"... What is section 2?\"",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Without prefix caching: process the entire document for each request.\nWith prefix caching: process once and reuse KV cache for all follow-ups.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "4) Repeated templates or workflows",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "\"Summarize the following text:\" or repeated agent instructions.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Without prefix caching: template is recomputed each time.\nWith prefix caching: template KV cache is reused.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Important nuance",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Prefix caching only works when the prefix matches exactly at the token level. Small differences can prevent reuse.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Conceptually, this is similar to reusing a template instead of recreating it each time.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What Comes Next",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "At this point, we have handled:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "memory explosion\nfragmentation\nduplicate computation",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Two important problems remain:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "low GPU utilization\nlarge model overhead",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "We will cover both in the next part.",
+      "type": "paragraph"
+    }
+  ],
+  "images": [],
+  "bodyHash": "577c8988be154fcc86a181f99d90536370128bedfc0201ec0b51711adcfb7344"
+}

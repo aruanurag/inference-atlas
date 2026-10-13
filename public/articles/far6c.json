@@ -1,0 +1,241 @@
+{
+  "id": "far6c",
+  "title": "When One Prompt Becomes a Workflow",
+  "author": "Anurag Mohan",
+  "date": "September 17, 2026",
+  "url": "https://www.linkedin.com/pulse/when-one-prompt-becomes-workflow-anurag-mohan-far6c",
+  "blocks": [
+    {
+      "links": [],
+      "text": "How Agentic AI Changes LLM Inference",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Until now, I have mostly looked at inference through the lifecycle of a request: an application sends a prompt, the model processes it, generates tokens, and returns a response.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That is still the foundation. But once the application becomes an agent, one model request no longer maps neatly to one user interaction.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A chatbot may answer with one call. An agent investigating an issue, comparing options, or updating a record may plan, call tools, read results, make more decisions, retry an action, and then answer.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The user sees one task. The inference system sees a sequence of calls with different input sizes, output sizes, cache requirements, and latency expectations.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That is why agentic AI is not just more inference. It is a different inference workload.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What changes when an application becomes an agent?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Consider a support agent investigating a customer issue. It reads the request, decides which system to query, calls a CRM or searches documentation, interprets the returned information, possibly takes another action, then drafts a response.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Those calls do not look alike. Tool selection may have a short prompt and a tiny structured output. Reading account history, logs, or retrieved documents can be prefill-heavy. The final explanation may be decode-heavy.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "One task can include:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "short decision calls\nlong prefills after tool use\nlonger decodes for synthesis\nretries after tool or validation failures",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That is why requests per second does not describe agent demand very well. It misses the number, shape, and timing of the model calls created by each task.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why can a fast model endpoint still produce a slow agent?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Single-call metrics—time to first token, token speed, total latency, queueing, and throughput—still matter. But an agent's end-to-end time also includes tool waits, orchestration, additional prefill, retries, and the queue for every next model call.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A GPU can serve other requests while an agent waits for a database or browser tool, but the user's task is still paused. When that tool returns, the agent may also have a much larger context to send back to the model.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Sequential stages amplify tail latency. If five required stages each meet a latency target 95% of the time, only about 77% of tasks will have all five stages meet it, assuming the stages are independent. That is not a prediction for every system, but it shows why individually healthy services can still create a poor end-to-end experience.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This is where goodput becomes more useful than raw throughput. The outcome is not simply that a server generated many tokens. It is that a useful task was completed at the expected quality, within an acceptable time and cost.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why does context become such an important cost?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "An agent needs enough state to understand the original goal, what it has learned, what tools it has called, and what it should do next. In many implementations, a meaningful part of that state is sent back to the model after every tool call.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The final answer may be short, yet the system may repeatedly prefill the original request, conversation history, tool decisions, search results, logs, or retrieved documents.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Keeping everything in the prompt increases token cost, prefill latency, and KV-cache pressure with every loop. Summarizing or dropping information too aggressively can cause the agent to lose an important detail or repeat work it has already done.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That makes choices such as limiting tool output, extracting relevant fields, keeping structured state outside the prompt, and retrieving only the evidence needed for the next step part of inference design as well as agent design.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Where do KV cache and session affinity fit in?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "They become much more visible in an agent workflow.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "If the next model call preserves the earlier prompt tokens, the serving system may reuse the KV cache for that prefix rather than compute it again. The system prompt, the user's goal, and earlier agent messages may stay unchanged while a new tool result is appended. Reuse does not remove the cost of processing the new result, but it can avoid redoing earlier prefill work.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That reuse is not automatic. The token sequence has to remain compatible, so reordering messages or rewriting an early section can cause a cache miss. The next request also has to reach the cache. In many serving systems, cached state is local to a worker or GPU, so moving the continuation to another replica can turn a potential cache hit into a full prefill.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Session affinity, cache-aware routing, and shared-cache designs can help keep related steps near that state. But affinity is not free: it can make load balancing, autoscaling, and recovery harder.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "There is another important constraint when model routing enters the picture: a KV cache created for one model cannot simply be used by a different model. If an agent switches models, the new model has to build its own representation of the context.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Does model routing help agents, or make them harder to serve?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Both can be true.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Agents create useful routing opportunities. A small, fast model may be enough to classify a request, select a tool, extract a field, or validate a structured response. A stronger model may be needed for planning, complex reasoning, or the final answer.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That can reduce cost and improve latency for independent steps. But choosing a model only by the immediate subtask can hide the cost of the full workflow. Moving a long, context-heavy reasoning loop to a cheaper model may require a fresh prefill, lose the previous model's cache, and create more work if the result needs correction.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The routing question is therefore broader than, “Which model is best for this call?” It is, “What is the best decision for this task, given the context already built, the cache that may exist, the latency budget, and the cost of a retry?”",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Affinity becomes a routing consideration, not only an infrastructure concern. The best destination may be the model that is capable enough for the step and can continue from state the system has already paid to build.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What should we benchmark and scale for?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Traditional inference benchmarks remain valuable. They tell us about prefill and decode performance, time to first token, queueing, tail latency, and how a serving engine behaves on particular hardware.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But a benchmark made of identical, independent prompts will not reveal how a real agent behaves. An agent-focused workload needs sequential calls, changing context, representative tool-result sizes, tool delays, retries, and the bursts created when many workflows resume together.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "I would want to look at both the individual call and the full task:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How many model calls and tokens does a successful task require?\nWhich stages are prefill-heavy and which are decode-heavy?\nHow often does the system reuse a useful cache prefix?\nHow long do tools take, and how often do they trigger retries?\nWhat are the end-to-end latency and cost per completed task?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Autoscaling changes for the same reason. User request rate is no longer a direct proxy for model demand. An agent waiting on an external tool is not using generation capacity, but hundreds of tool responses arriving together can create a sudden wave of prefill work. Average GPU utilization or incoming requests alone can miss that shape.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The right signals will differ by system, but queued tokens, time to first token, active sequences, cache pressure, the prefill-versus-decode mix, and tool-completion patterns are often more informative than one request-per-second number.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What does good agent inference look like?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "It is not simply the fastest response from an individual endpoint. It is an agent that completes useful work reliably, within the expected latency and cost, while the system uses model capacity intelligently.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That means looking at both layers. At the inference layer, we still need model latency, token throughput, queueing, cache behavior, and utilization. At the workflow layer, we need to know how many steps the task took, where time was spent, whether a tool failed, which model was chosen, and whether the final result was useful.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Agents do not replace the inference questions I have been exploring. They connect them. Prefill and decode, KV-cache reuse, routing, batching, autoscaling, and observability now affect a chain of decisions rather than a single response.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The unit we are optimizing is no longer only a request. It is a workflow that carries state, pauses for external systems, resumes with new context, and still has to feel fast and reliable to the person waiting for the result.",
+      "type": "paragraph"
+    }
+  ],
+  "images": [],
+  "bodyHash": "45a0e266a4afdafc0e3672d4c52d31a590a9213b9552caac4f5d26a3d052cf67"
+}

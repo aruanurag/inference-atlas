@@ -1,8 +1,35 @@
 # Inference Atlas
 
-Inference Atlas is an interactive, visual map of the AI inference landscape — the tools, platforms, and primitives that carry a request through input efficiency, gateways, fleet control, response and KV caching, serving engines, runtimes, managed endpoints, and observability.
+Inference Atlas is an interactive education site for AI inference. It pairs four course levels with Anurag Mohan’s original inference articles and a curated landscape of the tools, platforms, and primitives that serve model requests.
 
-This is an **educational landscape, not a production tool selector**. It exists to help engineers and architects build a mental model of the inference stack: what each layer does, how tools relate to one another, and how the ecosystem fits together across both GPU and CPU/edge deployments.
+The **Learn** section uses a topic sidebar and one lesson at a time. **Articles** provides the complete source reading room, grouped by depth. **Landscape** explores one architecture layer at a time, with component details on demand. Demonstrations are illustrative, not hardware benchmarks or a production tool selector.
+
+## Courses
+
+- **Level 100 — Inference foundations (7 lessons):** inference versus training, request lifecycle, KV basics, model routing, GPU/CPU memory sizing, and the inference stack.
+- **Level 200 — Inside the serving engine (12 lessons):** prefill/decode, KV arithmetic and tiers, prefix reuse, batching, metrics, attention heads, paging, engine architecture, GGUF, and controlled local experiments.
+- **Level 300 — Distributed inference (10 lessons):** TP/PP/DP, GPU networks, llm-d, model/provider/replica routing, KV transfer, Kubernetes rollouts, private workbenches, and the NVIDIA stack.
+- **Level 400 — Production inference design (12 lessons):** cache-aware placement, conversation affinity, capacity, autoscaling, cold starts, benchmarking, agents, multimodal workloads, routing policy, MoE, structured decisions, and release gates.
+
+Each lesson includes an interactive explorer, a self-contained detailed guide, a worked example, guided practice, a glossary, common mistakes, and a knowledge check. Guides use comparison tables, formulas, flows, source graphics, and carefully labeled examples rather than a continuous wall of text. Their sections are expandable, with expand/collapse-all controls that preserve the active lab. Play, pause, step, and reset controls let learners inspect processes. Completion is stored on the current browser/device, and lesson URLs are shareable.
+
+Every imported article connects to at least one lesson, and its **complete original text is readable directly inside that lesson**, including its imported graphics. The Articles library remains available separately, but visiting LinkedIn is not required to complete the courses. Official external references are optional. Reading estimates cover the authored lesson guide and lab, not the optional complete source archive.
+
+## Original article archive
+
+The source inventory contains **30 editions of Inside LLM Inference plus 8 standalone inference articles**, reviewed and imported on October 13, 2026. Two unrelated cloud/DevOps articles are explicitly excluded in the inventory. The complete captured text, original source URLs, publication dates, and **7 original graphics** are preserved. Long originals load only when the reader opens them; they are not bundled into the initial app JavaScript. Graphics appear below the original text rather than at their original inline positions.
+
+`content/linkedin/inventory.json` records discovery, `captures.json` holds the original text blocks/links/graphics, and `curation.json` records the level, rationale, topics, and adaptation notes. The original text remains separate from the shorter course adaptation. Rebuild the small metadata index and per-article reader files after updating this source material:
+
+```bash
+npm run build:articles
+```
+
+This command validates inventory coverage, reviewed levels, source fields, and local graphics before generating `src/content/article-index.json` and `public/articles/*.json`. Source-block hashes and archive-to-course coverage are checked by the test suite. This is a point-in-time import, not an automatic LinkedIn scraper or subscription monitor. The imported writing and graphics are attributed to their author; linked third-party material retains its own terms.
+
+Advanced labs distinguish synthetic examples, arithmetic estimates, and recorded case-study observations. They do not run cloud infrastructure, launch model servers, call Jev, or perform live release, financial, or security actions. Hardware measurements in the OKE case study are source observations, not performance predictions.
+
+The memory lab uses editable hypothetical full-attention architecture assumptions. It estimates raw weights and KV state in GiB, plus an explicit workspace allowance. It does not predict throughput, automatically choose a real model's architecture, or guarantee runtime fit. Animation is reduced when the operating system requests reduced motion.
 
 ## Community-sourced
 
@@ -13,6 +40,8 @@ The AI inference ecosystem moves fast, and no single maintainer can track it alo
 ## What the site includes
 
 - A GPU/CPU-and-edge path switch that highlights compatible components.
+- Forty-one lessons across four courses, with interactive diagrams, memory controls, and knowledge checks.
+- Thirty-eight complete original articles with level filters, connected lessons, preserved source links, and seven graphics.
 - Nine selectable architecture layers with guided explanations of what each layer does and where it fits.
 - A selectable KV-cache memory ladder: GPU HBM, CPU DRAM, NVMe/object storage, and remote KV fabric.
 - A curated, community-maintained catalog of open-source projects, platforms, primitives, and managed services.
@@ -25,10 +54,23 @@ The AI inference ecosystem moves fast, and no single maintainer can track it alo
 index.html                  # Page metadata and Vite entry point
 src/
 ├── catalog.js               # Editorial layer and tool catalog
-├── main.js                  # Rendering, URL state, and interactions
+├── main.js                  # App navigation, course rendering, and landscape
+├── courses.js               # Curriculum, knowledge checks, and source links
+├── curriculum.js            # Source-aligned advanced lessons and course extensions
+├── lesson-details.js        # Standalone detailed guides, worked examples, and practice
+├── lesson-content.js        # Rich guide, formula, table, flow, and glossary rendering
+├── labs.js                  # Interactive and animated lesson explorers
+├── advanced-labs.js         # Distributed and production mechanism explorers
+├── articles.js              # Source index and on-demand original loading
+├── article-view.js          # Library, level filtering, and full-text readers
+├── simulation.js            # Memory, prefix, timing, and scheduling calculations
 ├── state.js                 # Shareable selection state helpers
 └── styles.css                # Responsive presentation system
 public/og.png                # Social sharing image
+public/articles/             # Complete on-demand original articles
+public/article-images/       # Original source graphics
+content/linkedin/            # Discovery, captures, and reviewed categorization
+scripts/build-articles.mjs   # Deterministic source-archive generator
 test/                        # Catalog and state behavior tests
 ```
 
@@ -55,7 +97,7 @@ npm test
 npm run build
 ```
 
-`npm test` verifies the catalog count, required fields, official URLs, hardware compatibility, and shareable URL-state behavior.
+`npm test` verifies catalog integrity, hardware compatibility, landscape URLs, memory/prefix/timing/batching calculations, capacity and routing decisions, SLO goodput, all 38 originals and 7 graphics, source/lab coverage across all 41 lessons, complete guide structure, valid rich-content blocks, local graphics, and escaped rendering.
 
 ## Deployment and analytics
 

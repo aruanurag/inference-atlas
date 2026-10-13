@@ -1,0 +1,345 @@
+{
+  "id": "2dzgf",
+  "title": "The Hidden Prompt: Why Multimodal Inference Is a Different Serving Problem",
+  "author": "Anurag Mohan",
+  "date": "September 22, 2026",
+  "url": "https://www.linkedin.com/pulse/hidden-prompt-why-multimodal-inference-different-serving-anurag-mohan-2dzgf",
+  "blocks": [
+    {
+      "links": [],
+      "text": "Most of the inference concepts I have been exploring start with tokens.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How many tokens are coming in? \nHow many need to be generated? \nIs the workload prefill-heavy or decode-heavy? \nCan the KV cache be reused? \nHow should requests be batched?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Those questions still matter when we move from text to images, audio, and video. But multimodal inference adds a new one: ",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "what has to happen before the LLM even receives its input?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Someone can send the text, “What is happening in this video?” That is only a few words. Yet the system may need to retrieve a file, decode frames, resize images, run a vision encoder, turn its output into the LLM’s input representation, and only then begin prefill and decode.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That is why multimodal inference is not just text inference with an image attached. The LLM may still generate text one token at a time, but the prompt is no longer just what the user typed.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why does prompt length stop telling us the whole story?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "With text-only inference, prompt length is relatively easy to reason about. A tokenizer converts text into token IDs, then the model processes them during prefill. Longer context means more prefill work and more KV-cache memory.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "With multimodal input, the visible text can be misleading.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Imagine two users who both write, “Summarize this.” One attaches a single image. The other attaches a ten-minute video. The prompt text is identical, but the work required to serve those requests is not.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The image may be resized or split into tiles. The video may need decoding and frame selection before it reaches a vision encoder. Audio has its own decoding and chunking path. Those choices decide how much information becomes part of the LLM’s context.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So what does that mean for an inference service?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Image resolution, image count, video duration, sampled frames, and audio length become part of capacity planning. They affect latency, memory, and cost. In multimodal inference, the expensive part of the prompt can be hidden behind one attachment button.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Where does the time go before the first token?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "For a text request, time to first token usually leads us to think about queueing and LLM prefill. That is still useful, but it is no longer enough.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A multimodal request often follows a path like this:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "media retrieval → decode and preprocessing → modality encoder → LLM prefill → decode",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The exact implementation varies by model, but there is now meaningful work before the LLM receives its effective prompt.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why does that matter?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Because a faster decode path will not help if the request is waiting for video frames to be decoded. Likewise, optimizing LLM prefill only solves part of the problem if the vision encoder is the bottleneck.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Instead of asking only, “Why is the LLM slow?”, I would ask, “Which stage delayed the first token?” ",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Media retrieval, \nCPU-side decoding, \nmage preprocessing, \nthe encoder, \nLLM prefill, \nor queueing behind another kind of request can all matter.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Does the LLM still do the same prefill and decode work?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "At the LLM core, yes.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For the common architecture where a vision or audio encoder output is mapped into the language model’s embedding space, the LLM receives one combined sequence: text tokens plus media representations. It then performs prefill over that combined sequence, just as it would for a long text prompt.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The familiar transformer work is still there: Q, K, and V projections, attention, output projections, and MLP layers—the same matrix multiplications that make up text serving. Prefill builds KV-cache entries for the combined context. Decode then runs the same autoregressive loop: process the next token, attend to the KV cache, sample the next output, and repeat.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So is the only change before prefill?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That is the right first way to think about the pipeline, but it is not the whole performance story. Multimodality adds preparation and encoder work before LLM prefill. Then the media representation can make the LLM context larger, which increases prefill work and KV-cache pressure.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Some models use resamplers or cross-attention rather than simply placing every media representation into a decoder-only token sequence. But the serving conclusion stays the same: modality encoding is an additional workload, and its output changes how much context the language model has to process.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What do I mean by input shape?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "I do not just mean file size in megabytes. I mean the normalized form of the request after the serving system has prepared it for the model.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For an image, that includes image count, original and processed resolution, whether it is tiled, and how many visual representations the processor produces. A 2,048 × 2,048 document page and a 512 × 512 screenshot can have very different encoder cost even if both are one image.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For video, I would track frames decoded, frames sampled or retained, and the processed resolution of each frame. Duration alone is not enough; a ten-minute video sampled at a few frames per minute is a very different request from a short clip where many frames are kept.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For audio, the useful shape includes duration, sample rate, chunk count, and the resulting audio representations. For every request, I would still keep text-input tokens and the requested output-token budget.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why track the processed form rather than only the upload?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Because it determines encoder batching, LLM prefill length, KV-cache use, and eventually latency. Two similar files can create very different workloads once one is tiled, another is downsampled, or a video is sampled more aggressively.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "If media becomes model input, what happens to the KV cache?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "KV cache is already central to text inference. During prefill, the model stores attention keys and values so it does not have to recompute all prior context for every generated token.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "When media representations are part of the LLM context, they contribute to prefill work and KV-cache memory. A user may send only a short sentence, yet the effective context can be large.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But there is another cache opportunity before the KV cache.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What if many requests use the same image, document page, or product asset?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A system may be able to reuse the processed media representation and avoid running the encoder again. That is different from reusing a text prefix or an existing KV-cache block. One avoids modality-encoding work; the other avoids downstream LLM prefill work.",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "vLLM",
+          "url": "https://docs.vllm.ai/en/latest/features/multimodal_inputs/"
+        }
+      ],
+      "text": "This is why one generic cache-hit metric can be misleading. A media-embedding cache hit does not necessarily mean the LLM prefill was reused, and a prefix-cache hit does not necessarily mean the expensive image or video processing disappeared. vLLM supports stable media IDs so media work can be reused across requests without rehashing the raw content.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Can we simply use fewer visual tokens?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "That will often be the first instinct.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For video, we can sample fewer frames. For images, we can resize more aggressively, reduce tiling, or prune visual tokens. These choices can lower encoder time, reduce LLM prefill work, and make the KV cache easier to manage.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So why not always make the media budget as small as possible?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Because the removed information may be exactly what the user needs. Lower frame density may work for a broad video summary, but fail when the task is to identify a brief moment, extract text from a document, or inspect a chart label.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Reducing visual or audio representations is not only an efficiency decision. It is also a decision about what evidence the model is allowed to lose. vLLM’s multimodal support makes that trade-off explicit: video-token pruning can reduce prefill time and KV-cache usage, but at some cost in accuracy.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Does batching work the same way?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Not quite.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Text batching already manages different prompt and generation lengths. Multimodal batching adds image resolutions, image counts, video frame counts, audio durations, and different encoder shapes.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That creates more uneven neighbors. A batch of small image questions may run efficiently. Put one long video request in that same batch, and it can demand much more media decoding, encoder work, and downstream context memory than the others.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "If we batch every request together only to maximize utilization, a simple image question can wait behind video-heavy work. If we isolate every shape, hardware utilization can suffer. The real decision is how to group requests with similar expected work while keeping the system busy.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What should a multimodal inference dashboard show?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Tokens per second is still useful, but it will miss the most important part of some requests.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "I would start with end-to-end time to first token, broken down into media acquisition, decode, preprocessing, encoder, LLM prefill, and queueing. Then I would break it down by input shape: image count and processed resolution, video frames decoded and retained, audio duration and chunks, text tokens, resulting multimodal tokens, and requested output tokens.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Media or embedding-cache metrics should stay separate from prefix- and KV-cache metrics. Finally, p95 and p99 latency should be shown by workload type and input-shape bucket, not only as one blended average. One image at a standard resolution is a different user experience from eight high-resolution document pages or a long sampled video.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So where does this leave the familiar inference model?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Prefill, decode, batching, routing, KV cache, and goodput are still the right concepts. Multimodal inference does not replace them. It asks us to apply them to a larger pipeline.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The system is no longer only scheduling tokens. It is also scheduling the work that creates them.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For images, audio, and video, that hidden work is often where the real performance story begins.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Further reading",
+      "type": "heading"
+    },
+    {
+      "links": [
+        {
+          "text": "vLLM: Multimodal Inputs",
+          "url": "https://docs.vllm.ai/en/latest/features/multimodal_inputs/"
+        },
+        {
+          "text": "NVIDIA Triton: End-to-end workflow for a multimodal model",
+          "url": "https://docs.nvidia.com/deeplearning/triton-inference-server/user-guide/docs/tensorrtllm_backend/docs/multimodal.html"
+        }
+      ],
+      "text": "vLLM: Multimodal Inputs\nNVIDIA Triton: End-to-end workflow for a multimodal model",
+      "type": "paragraph"
+    }
+  ],
+  "images": [],
+  "bodyHash": "d28cc869224914591a17bba384616badd45d3f5346449e54b70211f392e17693"
+}

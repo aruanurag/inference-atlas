@@ -1,0 +1,2746 @@
+{
+  "id": "jqjne",
+  "title": "Understanding llm-d and Distributed Inference",
+  "author": "Anurag Mohan",
+  "date": "July 21, 2026",
+  "url": "https://www.linkedin.com/pulse/understanding-llm-d-distributed-inference-anurag-mohan-jqjne",
+  "blocks": [
+    {
+      "links": [],
+      "text": "LLM Inference Challenges (Part 17)",
+      "type": "heading"
+    },
+    {
+      "links": [
+        {
+          "text": "previous part",
+          "url": "https://www.linkedin.com/pulse/understanding-memory-requirements-llm-inference-anurag-mohan-kcpre"
+        }
+      ],
+      "text": "In the previous part, we explored how to estimate memory for an LLM inference workload.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The basic equation was:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Total memory\n=\nmodel weights\n+\nKV cache\n+\nruntime overhead",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "But the deeper lesson was:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Weights determine whether the model can load.\n\nKV cache determines how much workload\nthe system can serve.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "We also saw that memory requirements grow with:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "context length\nconcurrent requests\nbatch size\ngenerated tokens",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That naturally leads to the next question:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What happens when one inference server\nis no longer enough?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "We can create more replicas.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "We can add more GPUs.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "We can deploy the model across a Kubernetes cluster.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But once we do that, another set of problems appears:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Which replica should receive each request?\n\nWhere is the request's KV cache?\n\nWhich replica has enough memory?\n\nWhich replica has the shortest queue?\n\nShould prefill and decode run together?\n\nHow should the system scale?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This is where llm-d becomes interesting.",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "Part 16",
+          "url": "https://www.linkedin.com/pulse/understanding-memory-requirements-llm-inference-anurag-mohan-kcpre"
+        }
+      ],
+      "text": "This article continues directly from the memory-planning questions in Part 16.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is llm-d?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "At a high level:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "llm-d\n=\na distributed inference serving stack",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "It helps coordinate LLM inference across multiple model servers, accelerators, nodes, and replicas.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A model server such as vLLM or SGLang runs the actual model.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "llm-d sits around those model servers and helps coordinate them as one distributed serving system.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A simple mental model is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "vLLM / SGLang\n=\nruns the model efficiently\n\nllm-d\n=\ncoordinates many model servers efficiently",
+      "type": "code"
+    },
+    {
+      "links": [
+        {
+          "text": "llm-d",
+          "url": "https://llm-d.ai/"
+        }
+      ],
+      "text": "The project’s primary architecture is Kubernetes-native. Its official documentation describes llm-d as a composable stack that coordinates model-server pods using LLM-aware routing, distributed KV-cache management, disaggregated serving, multi-node execution, and autoscaling. It supports multiple inference engines and accelerator platforms. (llm-d)",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Is llm-d an inference engine like vLLM?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "No.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This distinction is very important.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "vLLM is an inference engine.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It handles things like:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "model execution\ncontinuous batching\nPagedAttention\nKV cache allocation\nprefill\ndecode\ntoken sampling",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "llm-d operates at a higher level.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It handles things like:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "routing between model servers\ncluster-level request scheduling\nKV-cache locality across replicas\nprefill/decode disaggregation\nflow control\nautoscaling\nmulti-node deployment patterns",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So the architecture may look like:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "User\n  ↓\nllm-d Router\n  ↓\nvLLM Model Server\n  ↓\nGPU Workers\n  ↓\nModel Computation",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "llm-d does not replace vLLM.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It coordinates a fleet of engines such as vLLM or SGLang.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What problem does llm-d solve?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Suppose we deploy three replicas of the same model:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Replica 1\nReplica 2\nReplica 3",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Each replica may have:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "its own scheduler\nits own KV cache\nits own request queue\nits own GPU memory\nits own active batches",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Now requests start arriving.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A traditional load balancer may distribute them without understanding the internal state of each inference replica.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Request A → Replica 1\nRequest B → Replica 2\nRequest C → Replica 3\nRequest D → Replica 1",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That may work for normal web applications.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But LLM requests are not normal web requests.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The best destination may depend on:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "which replica already has the prompt prefix cached\nwhich replica has free KV-cache capacity\nwhich replica has the shortest queue\nwhich replica can meet the latency target\nwhich replica is a prefill worker\nwhich replica is a decode worker",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "A generic load balancer usually does not understand these details.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "llm-d introduces an inference-aware routing and scheduling layer.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why is normal load balancing not enough?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Imagine two model replicas:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Replica 1 → 40% GPU utilization\nReplica 2 → 40% GPU utilization",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "At first glance, both look equally healthy.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But internally:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Replica 1:\n- has the request's prefix cached\n- has enough free KV blocks\n- has a short decode queue\n\nReplica 2:\n- does not have the prefix cached\n- has high KV-cache pressure\n- has several long prompts waiting",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "A normal load balancer might see:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Replica 1 = healthy\nReplica 2 = healthy",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "An inference-aware router sees:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Replica 1 is probably a much better destination.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That difference can affect:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "time to first token\nqueueing time\nprefill work\nKV-cache hit rate\nGPU utilization\ntotal throughputIs llm-d only a smarter load balancer?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "No.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Intelligent routing is one of its central capabilities, but llm-d covers a larger distributed inference problem.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A useful mental model is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Load balancer\n=\nsend traffic across endpoints\n\nllm-d\n=\nunderstand inference state\nand coordinate traffic, memory,\nworkers, phases, and scaling",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Its major capabilities include:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "LLM-aware routing\nKV-cache-aware scheduling\ndistributed KV-cache indexing\nKV-cache offloading\nprefill/decode disaggregation\nflow control\nautoscaling\nmulti-node serving patterns\nbenchmarking and deployment recipes",
+      "type": "code"
+    },
+    {
+      "links": [
+        {
+          "text": "GitHub",
+          "url": "https://github.com/llm-d/llm-d/blob/main/docs/getting-started/README.md"
+        }
+      ],
+      "text": "The stack is composable, so operators can adopt only the pieces they need rather than deploying every capability at once. (GitHub)",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What are the main parts of llm-d?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The current architecture is organized around three core concepts:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Router\nInferencePool\nModel Server",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The official architecture describes them as follows:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Router\n=\nthe intelligent entry point\n\nInferencePool\n=\nthe group of eligible model servers\n\nModel Server\n=\nthe engine that executes the model",
+      "type": "code"
+    },
+    {
+      "links": [
+        {
+          "text": "GitHub",
+          "url": "https://github.com/llm-d/llm-d/blob/main/docs/architecture/README.md"
+        }
+      ],
+      "text": "(GitHub)",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is the llm-d Router?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The Router receives inference traffic and decides where it should go.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It has two major functional parts:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Proxy\n+\nEndpoint Picker",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The proxy handles the actual network request.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The Endpoint Picker, usually called the EPP, provides the routing intelligence.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The flow looks like:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Request\n  ↓\nProxy\n  ↓\nEndpoint Picker\n  ↓\nSelected Model Server",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The proxy may be an L7 proxy such as Envoy.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The Endpoint Picker examines the eligible model servers and scores them.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It then tells the proxy which endpoint should receive the request.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What does the Endpoint Picker consider?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The Endpoint Picker can consider signals such as:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "prefix-cache locality\nKV-cache utilization\nqueue depth\nsession affinity\nmodel metadata\nconfigured routing policies",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So it is not simply asking:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Which replica is next?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "It is asking:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Which replica is currently\nthe best destination for this request?",
+      "type": "code"
+    },
+    {
+      "links": [
+        {
+          "text": "GitHub",
+          "url": "https://github.com/llm-d/llm-d/blob/main/docs/getting-started/README.md"
+        }
+      ],
+      "text": "The official llm-d documentation identifies prefix-cache locality, available KV-cache capacity, and queue depth as core scoring signals. (GitHub)",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is an InferencePool?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "An InferencePool groups model-server endpoints that can serve the same base model.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Imagine:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "InferencePool: Qwen-Model\n\n├── Model Server A\n├── Model Server B\n├── Model Server C\n└── Model Server D",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The Router does not need to manually track every server.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It discovers the eligible servers through the InferencePool.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A useful mental model is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Kubernetes Service\n=\ngeneric group of application endpoints\n\nInferencePool\n=\nLLM-aware group of model-server endpoints",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The InferencePool becomes the Router’s discovery target.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is an InferencePool variant?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Not every server inside an InferencePool must have the same role.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Some servers may be optimized for:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "prefill",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Others may be optimized for:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "decode",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Some may use:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "different hardware\ndifferent cost profiles\ndifferent latency profiles\ndifferent throughput profiles",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "llm-d represents these logical subgroups using labels called variants.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "InferencePool: Model-X\n\nPrefill Variant:\n├── Prefill Server 1\n└── Prefill Server 2\n\nDecode Variant:\n├── Decode Server 1\n├── Decode Server 2\n└── Decode Server 3",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The Router can then choose endpoints based on the role needed for that request.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is a Model Server?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The Model Server is the component that actually executes the model.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Examples include:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "vLLM\nSGLang",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The Model Server handles the local inference work:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "tokenization\nprefill\ndecode\nKV-cache operations\ncontinuous batching\nmodel execution\ntoken generation",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The Model Server may use:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "one GPU\nmultiple GPUs\ntensor parallelism\npipeline parallelism\nmulti-node workers",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "From llm-d’s perspective, it is an endpoint capable of performing a particular inference role.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What does a basic llm-d architecture look like?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "At a high level:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Client\n  ↓\nGateway / Proxy\n  ↓\nEndpoint Picker\n  ↓\nInferencePool\n  ├── Model Server A\n  ├── Model Server B\n  ├── Model Server C\n  └── Model Server D",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Or more simply:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "User\n  ↓\nllm-d Router\n  ↓\nBest Model Server\n  ↓\nInference Engine\n  ↓\nAccelerators",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "What happens when a request arrives?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Suppose the user sends:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "\"Explain distributed inference\"",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The flow may look like this:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "1. Request reaches the gateway.\n\n2. Proxy asks the Endpoint Picker\n   where the request should go.\n\n3. Endpoint Picker examines\n   the available model servers.\n\n4. It considers:\n   - queue depth\n   - cache locality\n   - KV-cache pressure\n   - server role\n   - routing policy\n\n5. It selects a model server.\n\n6. Proxy forwards the request.\n\n7. The model server performs\n   prefill and decode.\n\n8. Generated tokens stream\n   back to the user.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The important point is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The routing decision is aware\nof LLM inference state.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "How is the llm-d Router different from the vLLM scheduler?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "This is another important distinction.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The llm-d Router decides:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Which model server should receive the request?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The vLLM scheduler decides:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Which requests inside this model server\nshould run during the next engine step?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "llm-d Router\n=\ncluster-level scheduling\n\nvLLM Scheduler\n=\nengine-level scheduling",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The full flow is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Incoming Request\n  ↓\nllm-d chooses a model server\n  ↓\nvLLM admits the request\n  ↓\nvLLM places it into prefill/decode batches\n  ↓\nGPU executes the work",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Both schedulers matter.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "They simply operate at different levels.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How is this different from model routing?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Earlier in the series, we discussed model routing.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A model router may decide:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Simple request → small CPU model\n\nComplex request → large GPU model\n\nDocument request → document model",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That answers:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Which model or service should handle this request?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "llm-d usually answers a different question:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Which serving endpoint for the selected model\nshould handle this request?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Model Router\n=\nchoose the model or service\n\nllm-d Router\n=\nchoose the best inference endpoint\ninside the distributed serving system",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "A complete platform may use both:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "User\n  ↓\nModel Router\n  ↓\nLarge Model Service selected\n  ↓\nllm-d Router\n  ↓\nBest model-server endpoint\n  ↓\nvLLM\n  ↓\nGPU",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Why is KV-cache-aware routing important?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Suppose every request begins with the same large system prompt:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "\"You are an enterprise support assistant.\nFollow these policies...\nUse these product documents...\"",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That shared prefix may contain thousands of tokens.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Replica 1 has already processed that prefix.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Its KV cache contains the corresponding blocks.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Now another request arrives with the same prefix.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The Router has two choices.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Choice 1",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Send the request to Replica 2:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Replica 2 has no cached prefix.\n\nIt must recompute the full prefill.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Choice 2",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Send it to Replica 1:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Replica 1 already has the prefix cached.\n\nIt can reuse the cached computation.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Choice 2 may avoid a large amount of repeated prefill work.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That can improve:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "TTFT\nthroughput\nGPU efficiency\ncost per request",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "What does normal round-robin routing do here?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "A simple routing policy may produce:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Request 1 → Replica A\nRequest 2 → Replica B\nRequest 3 → Replica C\nRequest 4 → Replica A",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Even when all four requests share the same prefix.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The cache becomes scattered.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Each replica may repeatedly process the same tokens.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The cluster has more hardware, but it is still wasting computation.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "KV-cache-aware routing tries to preserve locality:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Requests with reusable prefixes\n→ replicas containing those prefixes",
+      "type": "code"
+    },
+    {
+      "links": [
+        {
+          "text": "GitHub",
+          "url": "https://github.com/llm-d/llm-d/blob/main/docs/getting-started/README.md"
+        }
+      ],
+      "text": "llm-d supports prefix-cache-aware routing and can maintain an index of which token blocks are present on which model servers. (GitHub)",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Is prefix-cache-aware routing the same as a sticky session?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Not exactly.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A sticky session usually means:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Same user\n→ same replica",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Prefix-cache-aware routing means:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Request\n→ replica containing the most useful prefix",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Sometimes these result in the same choice.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But not always.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For example, many different users may share:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "the same system prompt\nthe same document prefix\nthe same agent instructions\nthe same cached conversation history",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Prefix-aware routing can potentially reuse that shared state even when the users are different.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So the routing decision is based on:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "cache similarity",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "not only:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "user identity",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "What does distributed KV cache mean?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "It does not necessarily mean there is one giant shared GPU memory space.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Instead, it usually means:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "KV-cache blocks are distributed\nacross multiple model servers.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "For example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Replica A:\nPrefix X blocks\n\nReplica B:\nPrefix Y blocks\n\nReplica C:\nPrefix Z blocks",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The distributed serving system needs to know:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "which blocks exist\nwhere they exist\nwhether they can be reused\nwhether they should be transferred\nwhether they should be offloaded",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So a better mental model is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Distributed KV cache\n=\nmany local caches\n+\ncluster-level knowledge\n+\nrouting and transfer mechanisms",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "What is KV-cache indexing?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "KV-cache indexing means maintaining information about where cached token blocks live.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Imagine a logical index:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Prefix A → Replica 1\nPrefix B → Replica 3\nPrefix C → Replica 1 and Replica 2",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "When a request arrives, the Router can consult this information.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It may discover:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Replica 1 has 80% of the prefix cached.\n\nReplica 2 has 20% cached.\n\nReplica 3 has none.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "But cache locality is not the only factor.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Perhaps Replica 1 is overloaded.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Then the Router must balance:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "reuse cached computation\nvs\navoid an overloaded replica",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That is what makes inference routing a real scheduling problem.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Does the Router always choose the replica with the largest cache hit?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Not necessarily.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Suppose:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Replica 1:\n90% prefix match\nvery long queue\n\nReplica 2:\n70% prefix match\nalmost idle",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The best choice may depend on:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "estimated prefill cost\nqueue waiting time\nKV-cache capacity\nlatency target\nrequest priority",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So an intelligent policy may calculate something like:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Expected completion time\n=\nqueue delay\n+\nmissing prefill work\n+\ndecode time",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The best destination is not always the emptiest replica.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It is also not always the replica with the highest cache match.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The router must consider both.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How does this connect to memory planning?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "In Part 16, we used:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Total memory\n=\nweights\n+\nKV cache\n+\noverhead",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That formula still applies to every model server.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "llm-d does not make the memory requirement disappear.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Instead, it helps coordinate memory across the fleet.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Replica A is low on KV space.\n\nReplica B has more free blocks.\n\nReplica C contains a valuable cached prefix.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The Router can consider that information when selecting a destination.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So the memory question becomes:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Not only:\nDoes the cluster have enough memory?\n\nBut also:\nWhere is that memory available?\nWhere is useful state already cached?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Does llm-d make model weights smaller?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "No.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "llm-d does not quantize the model.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It does not reduce the parameter count.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It does not replace tensor parallelism.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "If a model needs 80 GB of weight memory, the model still needs approximately that memory somewhere in the serving topology.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "llm-d helps coordinate:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "where model servers run\nhow requests reach them\nhow KV cache is reused\nhow workers are scaled\nhow runtime phases are distributed",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "It improves orchestration.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It does not change the mathematical size of the model.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is KV-cache offloading?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "GPU memory is fast, but limited.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Once GPU HBM becomes full, the system may need another place to store less-active KV-cache blocks.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A memory hierarchy may look like:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "GPU HBM\n  ↓\nCPU memory\n  ↓\nlocal or shared storage",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The fastest and most active blocks remain close to the accelerator.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Other blocks may be moved to a slower, larger tier.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "When those blocks are needed again, they can be restored.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A useful analogy is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "GPU KV cache\n=\nhot working set\n\nCPU memory\n=\nwarm cache tier\n\nStorage\n=\nlarger cold cache tier",
+      "type": "code"
+    },
+    {
+      "links": [
+        {
+          "text": "GitHub",
+          "url": "https://github.com/llm-d/llm-d/blob/main/docs/getting-started/README.md"
+        }
+      ],
+      "text": "llm-d supports KV-cache management patterns that include cache indexing and tiered offloading beyond accelerator memory. (GitHub)",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Does offloading make memory unlimited?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "No.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Offloading expands effective capacity, but slower tiers have costs.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Moving data between:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "GPU\nCPU\nstorage",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "takes time and bandwidth.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So the tradeoff becomes:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "recompute the prefix\nvs\nreload cached KV blocks",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "If loading the cache is faster than recomputing it, reuse may help.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "If the cache is stored too far away or the network is slow, recomputation may be cheaper.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Again, the correct decision depends on the workload and infrastructure.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is prefill/decode disaggregation?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Earlier, we learned that inference has two different runtime phases:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Prefill\nand\nDecode",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Prefill processes the prompt.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Decode generates tokens one at a time.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "These phases have different performance characteristics.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A simple model server handles both:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Model Server\n├── Prefill\n└── Decode",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This is called a monolithic deployment.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Prefill/decode disaggregation separates them:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Prefill Workers\n+\nDecode Workers",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Now one set of workers processes prompts.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Another set generates output tokens.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How is this different from tensor or pipeline parallelism?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The distinction is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Tensor Parallelism\n=\nsplit tensors inside a layer\n\nPipeline Parallelism\n=\nsplit model layers\n\nData Parallelism\n=\nreplicate the model-serving unit\n\nPrefill/Decode Disaggregation\n=\nsplit runtime phases",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "With prefill/decode disaggregation:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Prefill cluster\n=\noptimized for prompt processing\n\nDecode cluster\n=\noptimized for token generation",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Each cluster may still use:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "tensor parallelism\npipeline parallelism\ndata parallelism",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So disaggregation does not replace the earlier parallelism strategies.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It exists at another layer.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What does a disaggregated request flow look like?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Suppose a user sends a long prompt.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The flow may be:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "User\n  ↓\nllm-d Router\n  ↓\nPrefill Worker\n  ↓\nPrompt is processed\n  ↓\nKV cache is created\n  ↓\nKV cache is transferred\n  ↓\nDecode Worker\n  ↓\nTokens are generated\n  ↓\nResponse streams to user",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The Router must therefore choose two destinations:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Which prefill worker?\n\nWhich decode worker?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "It must also coordinate the handoff between them.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why separate prefill and decode?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Because they stress hardware differently.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Prefill usually involves:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "many input tokens\nlarge matrix operations\nhigh compute utilization",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Decode usually involves:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "one token per sequence per step\nrepeated weight and KV-cache reads\nlatency-sensitive execution\nmemory-bandwidth pressure",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "When both phases share the same workers, large prefill requests can interfere with active decode requests.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Long prompt arrives\n  ↓\nLarge prefill starts\n  ↓\nExisting decode requests slow down\n  ↓\nInter-token latency increases",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "By separating the phases, operators can scale and tune them independently.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What does independent scaling mean?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Suppose the workload has very long prompts but short outputs.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The system may need:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "more prefill capacity\nfewer decode workers",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Another workload may have short prompts but very long responses.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It may need:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "fewer prefill workers\nmore decode capacity",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "With a monolithic deployment, each replica contains both capabilities.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "With disaggregation, the ratio can be adjusted:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "2 Prefill Workers\n+\n6 Decode Workers",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "or:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "6 Prefill Workers\n+\n2 Decode Workers",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That can better match the workload shape.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is the major cost of disaggregation?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The KV cache must move from the prefill worker to the decode worker.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That transfer can be large.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The request cannot begin decode until the required KV-cache state is available.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So networking becomes part of the critical path.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The flow is now:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Prefill compute\n+\nKV-cache transfer\n+\nDecode compute",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "A slow transfer directly increases time to first token.",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "GitHub",
+          "url": "https://github.com/llm-d/llm-d/blob/main/docs/getting-started/README.md"
+        }
+      ],
+      "text": "Current llm-d disaggregated serving uses transfer mechanisms such as NIXL with high-speed network transports. The project’s networking guidance emphasizes that KV-cache transfer time becomes a first-order contributor to TTFT. (GitHub)",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Does prefill/decode disaggregation always improve performance?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "No.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It depends on:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "prompt length\noutput length\nrequest concurrency\nGPU topology\nnetwork bandwidth\ntransfer latency\nprefill/decode worker ratio",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "For a small model with short prompts, the transfer overhead may not be worthwhile.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For long-context workloads where prefill heavily interferes with decode, separation may be useful.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So disaggregation should not be treated as:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "always faster",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "It should be treated as:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "a topology that may improve performance\nfor the right workload",
+      "type": "code"
+    },
+    {
+      "links": [
+        {
+          "text": "llm-d",
+          "url": "https://llm-d.ai/blog/llm-d-v0.2-our-first-well-lit-paths"
+        }
+      ],
+      "text": "Official llm-d benchmarks have also shown that the benefit varies with concurrency and workload shape, which is why the project provides tested configurations rather than presenting one universal topology. (llm-d)",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What are llm-d’s “well-lit paths”?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Distributed inference has many possible configurations.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How many prefill workers?\nHow many decode workers?\nWhich tensor-parallel size?\nWhich networking backend?\nWhich cache policy?\nWhich routing policy?\nWhich autoscaling metric?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "There is no single answer that works everywhere.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "llm-d uses the term:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Well-Lit Paths",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "for tested and benchmarked deployment recipes.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A well-lit path may include:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "deployment manifests\nHelm configurations\nhardware assumptions\nperformance settings\nsample workloads\nbenchmark results\nobservability configuration",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The idea is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Do not start with an empty page.\n\nStart with a tested pattern,\nmeasure it,\nthen adapt it.",
+      "type": "code"
+    },
+    {
+      "links": [
+        {
+          "text": "GitHub",
+          "url": "https://github.com/llm-d/llm-d/blob/main/docs/getting-started/README.md"
+        }
+      ],
+      "text": "The project documents well-lit paths for patterns such as intelligent scheduling, disaggregated serving, and large multi-node workloads. (GitHub)",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How does flow control fit into llm-d?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Suppose every model server maintains its own isolated queue.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The Router sends a request to Replica A.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Immediately afterward, Replica A becomes overloaded.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The request is now stuck behind work already assigned to that server.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Another replica may become free, but the request has already been committed.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Flow control can delay the final endpoint decision until capacity is available.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This is sometimes called:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "late-binding scheduling",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Instead of:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Request arrives\n→ immediately assign replica\n→ wait in that replica's queue",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "the system can use:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Request arrives\n→ hold in an inference-aware queue\n→ choose the best replica\n  when capacity becomes available",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This gives the Router more current information when making the decision.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why is centralized queueing useful?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "It can help prevent this situation:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Replica A:\n10 requests waiting\n\nReplica B:\n0 requests waiting",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "while another new request is accidentally sent to Replica A.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A cluster-level queue gives the routing system a better view of total demand.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It can also support:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "request priorities\ntenant fairness\ninteractive vs batch traffic\nadmission control\nlatency SLOs",
+      "type": "code"
+    },
+    {
+      "links": [
+        {
+          "text": "GitHub",
+          "url": "https://github.com/llm-d/llm-d/blob/main/docs/getting-started/README.md"
+        }
+      ],
+      "text": "Current llm-d routing capabilities include policy-aware flow control, priority dispatch, late binding, and guardrails for requests that cannot meet configured latency objectives. (GitHub)",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is admission control?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Admission control asks:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Should this request enter the serving system now?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Suppose every replica is saturated.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The system has several choices:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "accept the request and let latency explode\n\nqueue the request\n\nreject the request\n\nsend it to another model or cluster",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Sometimes accepting everything is worse than rejecting some traffic.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "If the system keeps admitting requests beyond capacity:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "queues grow\nKV-cache pressure grows\nTTFT increases\ninter-token latency increases\ntimeouts increase",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Admission control protects the requests already being served.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How does autoscaling fit into this?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Kubernetes can add or remove model-server replicas.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But traditional autoscaling often looks at:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "CPU utilization\nGPU utilization",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Those signals alone may not describe inference demand well.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A GPU can be highly utilized but still healthy.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Another GPU can look underutilized while its KV cache is almost full.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "More useful inference signals may include:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "queue depth\nrequest arrival rate\nactive sequences\nKV-cache pressure\nTTFT\nTPOT\nthroughput\npending token work",
+      "type": "code"
+    },
+    {
+      "links": [
+        {
+          "text": "GitHub",
+          "url": "https://github.com/llm-d/llm-d/blob/main/docs/getting-started/README.md"
+        }
+      ],
+      "text": "llm-d can expose router-level demand metrics for Kubernetes autoscaling and also supports more advanced workload-variant scaling patterns. (GitHub)",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is a workload variant?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Suppose the same model is available in several forms:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Variant A:\nexpensive GPU\nlow latency\n\nVariant B:\ncheaper GPU\nhigher throughput\n\nVariant C:\nquantized model\nlower cost",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Or:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Variant A:\nprefill workers\n\nVariant B:\ndecode workers",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Variants allow the platform to distinguish these serving profiles.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "An autoscaler or router can then reason about:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "which variant should grow\nwhich variant should shrink\nwhich variant can meet the SLO\nwhich variant is most cost-effective",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Does llm-d replace Kubernetes?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "No.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "llm-d builds on Kubernetes.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Kubernetes still manages:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "pods\nnodes\ndeployments\nnetworking\nhealth checks\nresource requests\nscheduling\nrestarts\nscaling primitives",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "llm-d adds inference-specific intelligence.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A simple mental model is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Kubernetes\n=\nmanages workloads and infrastructure\n\nllm-d\n=\nmanages distributed inference behavior",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Is llm-d limited to Kubernetes?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "llm-d was designed as a Kubernetes-native project, and its main architecture uses resources such as Gateways, InferencePools, labels, Deployments, and autoscaling primitives.",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "llm-d",
+          "url": "https://llm-d.ai/blog/running-llm-d-without-kubernetes"
+        }
+      ],
+      "text": "However, the project has also introduced a discovery mode that lets its routing intelligence operate outside Kubernetes environments. The central routing ideas—KV-cache awareness, prefix affinity, flow control, and disaggregated routing—do not fundamentally require Kubernetes. (llm-d)",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For this series, the most useful starting point is still:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "llm-d\n=\nKubernetes-native distributed inference",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "because that is where the architecture is easiest to connect with LLMOps.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Does llm-d only work with vLLM?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "No.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "vLLM has been a major engine in the llm-d ecosystem, but the architecture is designed to support multiple model servers.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Current project documentation lists engines such as:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "vLLM\nSGLang",
+      "type": "code"
+    },
+    {
+      "links": [
+        {
+          "text": "GitHub",
+          "url": "https://github.com/llm-d/llm-d/blob/main/docs/getting-started/README.md"
+        }
+      ],
+      "text": "and multiple accelerator platforms. (GitHub)",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The key abstraction is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Model Server ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "As long as the server exposes the interfaces and signals required by the stack, it can participate in the distributed serving architecture.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Does llm-d make a single request faster?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Not automatically.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "If there is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "one model server\none request\nno reusable prefix\nno queue\nno memory pressure",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "adding a distributed routing layer may not help much.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The main benefits appear when the system has:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "multiple replicas\nmany concurrent requests\nrepeated prefixes\nlong prompts\nKV-cache pressure\ndifferent worker roles\nstrict latency targets",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "llm-d is primarily about improving system-level behavior.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It tries to make the whole fleet more efficient.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "When might llm-d be unnecessary?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "A simple deployment may not need it.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "one local model\none vLLM server\nsmall traffic\nno Kubernetes\nno scaling requirement",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "In that case:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Application\n  ↓\nvLLM\n  ↓\nGPU",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "may be enough.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Adding llm-d would introduce:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "more components\nmore configuration\nmore observability needs\nmore networking complexity",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Distributed systems should solve an actual scaling problem.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "They should not be added only because they look advanced.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "When does llm-d start becoming useful?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "It becomes more relevant when we have:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "multiple inference replicas\nlarge or variable workloads\nlong-context requests\nrepeated prompt prefixes\nmany concurrent users\nprefill/decode interference\nmulti-node model deployments\ncost or latency SLOs\nKubernetes-based operations",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "At that point, the problem changes from:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How do I run this model?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "to:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How do I operate a fleet\nof model-serving systems efficiently?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That is the problem llm-d is designed around.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What does llm-d not solve?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "llm-d does not remove the fundamental limits of inference.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It does not eliminate:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "autoregressive decoding\nmodel weight memory\nKV-cache growth\nnetwork latency\nGPU saturation\nhardware failures",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "It helps coordinate these constraints.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But operators still need to understand:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "workload shape\ncapacity\nmemory\nnetwork topology\nlatency targets\ncost constraints",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "There is no distributed system that makes these tradeoffs disappear.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What should we monitor in an llm-d deployment?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "At the request level:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "TTFT\nTPOT / inter-token latency\nend-to-end latency\nrequest failures\nqueueing time",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "At the inference level:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "input tokens/sec\noutput tokens/sec\nactive sequences\nbatch occupancy\nprefix-cache hit rate\nKV-cache utilization",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "At the routing level:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "requests per endpoint\nrouting decisions\nqueue depth\ncache-affinity score\nrequest priority\nadmission failures",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "At the infrastructure level:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "GPU utilization\nGPU memory\nnetwork throughput\nKV-transfer time\npod health\nnode health\nreplica count",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "For disaggregated serving, this metric becomes especially important:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "KV-cache transfer time",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Because a slow transfer directly affects the time before decode can begin.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is the full mental model now?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The complete architecture can look like:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "User\n  ↓\nAPI Gateway\n  ↓\nModel Router\n  ↓\nSelected Model Service\n  ↓\nllm-d Router\n  ↓\nInferencePool\n  ├── Prefill Variant\n  │     ├── Prefill Worker A\n  │     └── Prefill Worker B\n  │\n  └── Decode Variant\n        ├── Decode Worker A\n        ├── Decode Worker B\n        └── Decode Worker C\n              ↓\n         vLLM / SGLang\n              ↓\n         GPU Workers",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "For a normal monolithic deployment:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "User\n  ↓\nllm-d Router\n  ↓\nInferencePool\n  ├── vLLM Replica A\n  ├── vLLM Replica B\n  └── vLLM Replica C",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The Router chooses the best replica.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The engine scheduler manages work inside that replica.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is the simplest way to remember the layers?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Kubernetes\n=\nkeeps the workloads running\n\nllm-d\n=\ncoordinates the inference fleet\n\nvLLM / SGLang\n=\nruns inference inside each serving unit\n\nCUDA / accelerator runtime\n=\nexecutes hardware operations\n\nGPU / accelerator\n=\nperforms the computation",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Or:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Kubernetes manages infrastructure.\n\nllm-d manages distributed inference.\n\nvLLM manages local inference.\n\nThe accelerator performs the math.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "What is the biggest mental shift?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Until now, many of the articles focused on one model-serving system.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "We asked:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How does one server manage KV cache?\n\nHow does one engine batch requests?\n\nHow much memory does one workload need?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "llm-d moves the mental model to the cluster level.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Now the questions become:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Where is the useful cache?\n\nWhich endpoint has capacity?\n\nWhere should prefill run?\n\nWhere should decode run?\n\nShould the KV cache move?\n\nShould another replica start?\n\nCan this request meet its latency target?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That is a major shift.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "We are no longer only optimizing model execution.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "We are optimizing:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "placement\nrouting\nmemory locality\nnetwork transfers\nworker specialization\ncluster capacity",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "What is the key intuition?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The easiest summary is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "vLLM makes an inference engine efficient.\n\nllm-d makes a fleet of inference engines\nwork together intelligently.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "A slightly deeper version is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "llm-d connects:\n\nKubernetes\n+\ninference-aware routing\n+\ndistributed KV-cache management\n+\nprefill/decode disaggregation\n+\nautoscaling\n+\nmodel-serving engines",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Its goal is not only to add more servers.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Its goal is to use those servers more intelligently.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What comes next?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "This article introduced the overall llm-d architecture.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But one idea deserves a much deeper look:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "KV-cache-aware routing",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "How does the Router know which prefixes are cached?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How does it compare cache locality against queue depth?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What happens when two replicas contain parts of the same prefix?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "When should the system reuse cache, transfer cache, or recompute?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That leads naturally to:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "LLM Inference Challenges (Part 18)",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Understanding KV-Cache-Aware Routing",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Because once inference becomes distributed, the important question is no longer only:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Do we have enough KV cache?",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "It becomes:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Where is the KV cache,\nand how do we send each request\nto the place where it is most useful?",
+      "type": "code"
+    }
+  ],
+  "images": [],
+  "bodyHash": "260618abc46814e43afaa04a1ea307c1c41a0130c64518a5a82ff94bb0d49608"
+}

@@ -1,0 +1,776 @@
+{
+  "id": "ehxof",
+  "title": "LLM Inference Challenges - Understanding Distributed Serving & Request Routing",
+  "author": "Anurag Mohan",
+  "date": "May 26, 2026",
+  "url": "https://www.linkedin.com/pulse/llm-inference-challenges-understanding-distributed-serving-mohan-ehxof",
+  "blocks": [
+    {
+      "links": [],
+      "text": "LLM Inference Challenges (Part 8)",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Understanding Distributed Serving & Request Routing",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "In the previous parts, we explored tensor parallelism, pipeline parallelism, and data parallelism. At this point, we understand that modern inference systems use many GPUs together to run large models and handle large numbers of users.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But something still feels incomplete.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What actually happens when a request first arrives?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "And when we say a request is routed to a “replica,” what exactly does that mean?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What happens when a request first arrives?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Suppose a user sends:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "\"Explain quantum computing\" ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "At first glance, it feels simple:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "request goes to model\nmodel generates response",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But internally, many things happen before the first token is generated.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Step 1 — The request reaches the API layer",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The request first reaches an API gateway or frontend service.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "User\n  ↓\nAPI Gateway ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This layer may handle:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "authentication\nrate limiting\nlogging\nvalidation\nAPI management",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "At this stage, the request has still not reached the GPUs.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Step 2 — The router/load balancer receives the request",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Next, the request reaches the routing layer.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Gateway\n   ↓\nRouter / Load Balancer ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This component decides:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Which model replica should handle this request? ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "What is a replica?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "This is where things become interesting.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "At first, I was thinking about replicas similar to traditional web servers behind a load balancer. In normal applications:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "each server has its own IP\nthe load balancer routes traffic across servers\neach server independently processes requests",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Load Balancer\n   ↓\nWeb Server 1\nWeb Server 2\nWeb Server 3 ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "But LLM inference systems are different.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A replica is usually not just:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "one GPU or even\none server",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A replica is actually:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "one complete model-serving unit ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "And that unit itself may contain:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "many GPUs\nmultiple pipeline stages\ntensor parallel groups\nschedulers\nKV cache\ncommunication layers",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Can a replica span multiple GPUs?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Yes.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Suppose we have:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "tensor parallel size = 4\npipeline parallel size = 4",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Then:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "4 GPUs per stage\n×\n4 stages\n=\n16 GPUs ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Now these 16 GPUs together form:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "ONE model replica ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The request is not independently handled by one GPU.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Instead:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "all GPUs cooperate together\ntensor parallel GPUs compute the same layer together\npipeline stages process different parts of the model",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So the replica behaves like:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "one giant distributed inference engine ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Does one replica always mean one server?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Not necessarily.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For smaller models:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "one replica may fit inside one server\nall GPUs may live in the same machine",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Server A\n├── GPU 1\n├── GPU 2\n├── GPU 3\n└── GPU 4 ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "In this case:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "replica ≈ one server",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But for larger models:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "one replica may span many servers",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Replica 1\n├── Server A → GPUs 1–8\n├── Server B → GPUs 9–16\n├── Server C → GPUs 17–24\n└── Server D → GPUs 25–32 ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Now:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "one replica\nspans multiple servers\nand many GPUs",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How do these servers work together?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The servers are connected using high-speed networking.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Inside one server:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "GPUs often communicate using NVLink or NVSwitch\ncommunication is extremely fast",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Across servers:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "systems may use InfiniBand or RDMA networking\noptimized for very high throughput and low latency",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This allows:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "GPUs across machines\nto behave like one coordinated inference system",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So a useful way to think about it is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Replica\n=\na distributed cluster of GPUs\nacting as one logical model instance ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "What does the load balancer actually balance then?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The load balancer usually routes traffic across replicas.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Load Balancer\n   ↓\nReplica 1 → GPUs 1–16\nReplica 2 → GPUs 17–32\nReplica 3 → GPUs 33–48 ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The load balancer is usually not routing directly to individual GPUs.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Instead:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "each replica internally coordinates its GPUs\nthe replica itself behaves like one serving target",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How does the router choose a replica?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The router may consider:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "current GPU utilization\nqueue length\nKV cache pressure\nbatch size\nlatency\nmemory availability",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Replica 1 → overloaded\nReplica 2 → healthy\nReplica 3 → long queue ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So the router selects:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Replica 2 ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Why is routing important?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Because inference systems constantly balance:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "throughput\nvs\nlatency ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "If too many requests go to one replica:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "queues grow\nlatency increases\nKV cache pressure increases",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "If requests are spread too aggressively:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "GPUs become underutilized\nbatching efficiency drops",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So routing becomes a scheduling problem.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What happens after replica selection?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Once a request reaches a replica:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Request\n   ↓\nReplica Scheduler ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The scheduler decides:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "when to execute the request\nwhich batch it should join\nwhether enough memory is available",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This is where continuous batching becomes important.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why don’t requests execute immediately?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Because GPUs are more efficient with batches.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Instead of:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "1 request\n→ 1 GPU execution ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "the scheduler tries to create:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Batch = [Request A, Request B, Request C] ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Now the GPUs process them together.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What happens during prefill?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The prompt tokens are first processed through the transformer layers.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "\"Explain quantum computing\" ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "becomes token IDs like:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "[1543, 8821, 9912, ...] ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "During this stage:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "attention is computed\nactivations flow through layers\nKV cache gets created",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This phase is called: Prefill ",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What happens during decode?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Once KV cache exists:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "token generation starts\none token depends on previous tokens",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Token 1\n→ Token 2\n→ Token 3 ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This phase becomes sequential.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This is called the decode loop.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why do requests usually stay on the same replica?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Because the KV cache already exists there.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "User Session\n   ↓\nReplica 2\n   ↓\nKV cache stored there ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "If generation suddenly moves to another replica:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "KV cache would need transfer\nlatency would increase heavily\nbandwidth usage would explode",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This is why systems often use:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "sticky sessions\nor\nsession affinity ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "What is the overall request flow?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "At a high level:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "User\n ↓\nAPI Gateway\n ↓\nRouter / Load Balancer\n ↓\nReplica\n ↓\nScheduler\n ↓\nBatch Formation\n ↓\nPrefill\n ↓\nDecode Loop\n ↓\nGenerated Tokens ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This is the basic lifecycle of a request inside a modern inference system.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What still feels unclear at this point?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Honestly, while learning this myself, one thing initially confused me:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "what exactly is a replica physically?\nwhere are the GPUs located?\nhow do multiple servers behave like one system?\nhow does GPU communication actually work underneath?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "At this stage, it is completely normal for these questions to appear.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Because now we are slowly transitioning from:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "“running a model on GPUs” to\n“understanding distributed GPU infrastructure”",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "And that is a very different mental model.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What comes next?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Now that we understand:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "request routing\nreplicas\nschedulers\nsession affinity\ndistributed model serving",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "the next natural step becomes:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How do all these GPUs and servers\nactually communicate fast enough\nto behave like ONE system? ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "In the next part, we will go deeper into:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "GPU clusters\nNVLink\nNVSwitch\nInfiniBand\ninter-node communication\nwhy networking becomes critical\nand what “inside a replica” really looks like.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This is where inference systems start looking much closer to distributed supercomputing systems than traditional backend applications.",
+      "type": "paragraph"
+    }
+  ],
+  "images": [],
+  "bodyHash": "a4cafcbfd4cd93d063f377b2f22fa922dde267dc57d3789f73adf39d4ebe1cdd"
+}

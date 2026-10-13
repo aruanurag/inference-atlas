@@ -1,0 +1,516 @@
+{
+  "id": "uh5ve",
+  "title": "Model Routing: Choosing the Right LLM for Each Request",
+  "author": "Anurag Mohan",
+  "date": "September 1, 2026",
+  "url": "https://www.linkedin.com/pulse/model-routing-choosing-right-llm-each-request-anurag-mohan-uh5ve",
+  "blocks": [
+    {
+      "links": [],
+      "text": "LLM Inference Challenges",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Model Routing: Choosing the Right LLM for Each Request",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Routing has become one of the most recurring themes in my LLM inference learning.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "I have already explored routing at the distributed inference layer: how requests reach the right replica, why KV-cache-aware routing matters, and how systems such as LLM-d try to avoid unnecessary prefill work while keeping inference efficient at scale.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Those discussions focused on a question like this:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A request already has a model. Where should that request run?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Model routing asks a different question:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Before inference even begins, which model should receive this request?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "At first, this may sound like an application-layer decision rather than an inference topic. But the more I looked into it, the more I realized that the model choice shapes almost everything that happens afterward.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Choosing a model determines:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Which weights need to be loaded and served\nHow much accelerator memory and compute the request is likely to consume\nThe prefill and decode behaviour of that request\nWhich KV cache can be reused\nWhich provider, deployment, and replica become eligible\nThe latency, cost, and quality trade-off the user will experience",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So, model routing is not separate from inference. It is the decision that sets the path for inference.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "request → choose model → choose provider/deployment → choose replica → reuse or build KV cache ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Each stage is a routing decision, but each solves a different problem.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "THE THREE ROUTING DECISIONS",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Model routing answers: “Which model should answer this request?” It determines the model’s capabilities, cost, context window, tool support, and expected quality.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Provider or deployment routing answers: “Where can this selected model be served?” It considers availability, region, price, and operational constraints.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Replica routing answers: “Which instance should receive the request?” It considers load distribution, latency, and KV-cache locality.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The previous routing articles were mainly about the final stage: efficiently serving a request after its model had already been selected.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This article moves one step earlier in the lifecycle. It explores what happens when the router can change the model itself—and why that can improve cost and quality for an isolated request while also creating new challenges around KV cache reuse, session affinity, and multi-turn conversations.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why one model is rarely enough",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Consider an internal assistant that receives all of these requests:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "“Extract the invoice number and total from this text.”\n“Summarize this meeting transcript in five bullets.”\n“Answer this question using the retrieved policy documents.”\n“Help me debug this Kubernetes networking issue.”\n“Create a migration plan with risks, dependencies, and rollback steps.”",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "They do not need the same capabilities.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A simple extraction request may need a fast, lower-cost model with reliable structured output. A difficult debugging or planning request may justify a stronger reasoning model. A RAG request may depend more on retrieval quality, grounding, and citation behaviour than on using the largest model available.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A model router can use signals such as:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Task type or intent\nEstimated complexity\nContext length\nTool-calling or structured-output requirements\nRetrieval confidence\nLatency and cost budget\nPrivacy, provider, or region constraints",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The goal is not to find one universally “best” model. It is to define a policy that makes good trade-offs for each request.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "At its simplest, the policy could be rule-based:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "if request is extraction:\n    use fast-model\nelif request needs long context or reliable tools:\n    use capable-model\nelif request is complex reasoning:\n    use reasoning-model\nelse:\n    use general-model",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This is easy to understand and test. But it does not yet account for the state created by a longer conversation.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The hidden cost of switching models: KV cache",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "When a model processes a prompt or conversation history, it creates a KV cache. That cache stores attention keys and values so the model can continue generating without recomputing every prior token.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It is tempting to call this “the conversation cache.” But it is really a cache created for a particular model and serving setup.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "If a conversation starts on Model A and the router sends the next turn to Model B, Model B can receive the visible conversation history—but it generally cannot reuse Model A’s KV cache. It has to process that history again and create its own cache.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A model switch can therefore mean:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A new prefill phase for the accumulated conversation\nHigher time-to-first-token latency\nMore input-token processing cost\nLoss of the benefit from an already warm cache\nPotentially different model behaviour, tone, or tool-use patterns",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Even moving the same model between replicas can lose cache locality unless the serving system can locate, transfer, or rebuild the cache. Switching to a different model makes the issue more fundamental.",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "vLLM",
+          "url": "https://docs.vllm.ai/en/v0.9.2/design/v1/prefix_caching.html"
+        }
+      ],
+      "text": "Prefix caching is valuable when the same model sees the same token prefix again; systems such as vLLM use it to avoid redundant prompt computation. But it is not a generic cache that automatically follows a conversation across unrelated models.",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "Cross-Model KV Cache Transfer in LLM Families",
+          "url": "https://arxiv.org/abs/2608.03893"
+        }
+      ],
+      "text": "Cross-model KV-cache transfer is an active research problem precisely because a model switch normally requires the receiving model to prefill the context again. A recent NVIDIA research preprint explores mapping cache between compatible models in a family, but that is specialised work—not something a typical model router can assume today. Cross-Model KV Cache Transfer in LLM Families",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Conversation affinity matters",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Now consider a longer conversation.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A user may begin by asking for a quick summary, move into a detailed technical question, ask for a code example, and then return to summarising a document. A stateless router might choose a different model for every turn.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That could be individually optimal for each prompt, but poor for the conversation as a whole.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The router has to decide whether it values the best model for the latest request more than it values continuity, cache reuse, and predictable behaviour.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "There are three broad approaches:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Route every request independently",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This gives the router the best chance to optimize each prompt for cost or capability.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The trade-off is more model switches, cold prefills, and potentially inconsistent behavior.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Keep one model for the full conversation",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This provides better model affinity, cache locality, and consistency.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The trade-off is that a simple follow-up may remain on an unnecessarily expensive model.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Route by task or conversation branch",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This lets a genuinely new task use a better-suited model.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The trade-off is that the application has to identify task boundaries well.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "There are also two related forms of affinity to think about.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Model affinity means keeping a conversation on the same model. This preserves more consistent behavior and avoids a cross-model prefill restart.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Replica or cache affinity means keeping requests near the same serving replica. This can preserve access to the model’s already-computed KV cache.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Model affinity alone is not enough. If the same model is selected but the next request reaches a different replica without access to the cache state, prefill work may still be repeated.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This is where model routing and KV-cache-aware serving need to work together.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A good model router should not only ask, “What is this prompt?” It should also ask:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Is this still the same task?\nWhich model is already serving this session?\nIs there a useful cache behind that model?\nIs the expected gain from switching larger than the cache and affinity penalties?\nWould a new task thread be better than switching models mid-conversation?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "In other words, a strong router needs memory.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A useful mental model is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "routing score =\ntask fit\n+ required capabilities\n+ cache/affinity benefit\n− cost\n− latency\n− switching penalty ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That is not a literal formula every router uses, but it captures the real decision. The best route may sometimes be: do not switch models.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How products approach this",
+      "type": "heading"
+    },
+    {
+      "links": [
+        {
+          "text": "OpenRouter’s Auto Router",
+          "url": "https://openrouter.ai/docs/guides/routing/routers/auto-router"
+        }
+      ],
+      "text": "OpenRouter’s Auto Router is a managed example of model routing. It classifies prompts, considers task fit, model capabilities, and cost preferences, and then selects an eligible model. It can also apply allowed-model restrictions and cost tiers.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is especially relevant here is its session stickiness. With a session identifier, OpenRouter can prefer the model already selected for a conversation while still reconsidering the choice if the task changes. That is a practical acknowledgement that completely independent per-turn routing is not always ideal.",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "LiteLLM’s Auto Routing",
+          "url": "https://docs.litellm.ai/docs/proxy/auto_routing"
+        }
+      ],
+      "text": "LiteLLM’s Auto Routing takes a more configurable gateway-style approach. Its current Auto Routing feature is marked beta, but it supports heuristics, keyword rules, an LLM classifier, or a custom classifier. It also supports optional session affinity.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This makes LiteLLM particularly interesting for a hands-on experiment. Instead of accepting an opaque routing decision, I can define the model tiers, make the policy visible, record why a route was chosen, and compare different affinity strategies.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A managed router can be useful when I want to experiment quickly. A configurable gateway becomes more interesting when I want to understand and evaluate the routing policy itself.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Neither approach removes the need to define what “good routing” means for a specific application.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The router needs to be evaluated too",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "A router can look successful if it lowers average cost while quietly making the hardest requests worse.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For each routed request, I would want to capture:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The selected model and routing reason\nThe task category or complexity score\nThe number of model switches in a session\nInput and output tokens\nTime to first token and total latency\nCost per request\nCache-hit or cold-prefill signals, where available\nQuality and consistency across the conversation\nRetries, fallbacks, and failures",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The real question is not:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Did the router choose the cheapest model?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Did the router preserve the quality users needed while improving cost, latency, or both?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The experiment I want to run next",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "For the next hands-on lab, I want to explore model routing with LiteLLM and compare three strategies across a small, multi-turn workload:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "One fixed model for every request\nStateless, per-request routing based only on the latest prompt\nSession-aware routing that keeps a model pinned unless there is a strong reason to switch",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "I would use three model tiers:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A fast, lower-cost model\nA stronger general-purpose model\nA reasoning-oriented model",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The test set should not only contain isolated prompts. It should include conversations where the user changes direction midway through:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Summarization followed by a deeper technical question\nRAG questions followed by a request for a structured action plan\nA coding discussion that later becomes a simple extraction task\nA conversation with repeated follow-ups about a long document",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The goal is not to prove that one strategy wins everywhere.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Stateless routing may lower the average model cost. Session-aware routing may reduce cold-prefill events and create a smoother multi-turn experience. The interesting part will be making that trade-off visible.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Closing thought",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Model routing changes the question from:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is the best model for my application?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "to:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is the best model for this request, in the context of this conversation and this inference system?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That final part matters.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Choosing a different model may improve the answer to one prompt, but it can also discard valuable inference state built during the conversation. Good routing is not only about finding the cheapest or strongest model. It is about knowing when switching models is worth it—and when preserving affinity is the smarter route.",
+      "type": "paragraph"
+    }
+  ],
+  "images": [],
+  "bodyHash": "0f3d1e1935bd17461ccf58113c43b48b9b5f944ecf8804bf9fc665d0934c6180"
+}

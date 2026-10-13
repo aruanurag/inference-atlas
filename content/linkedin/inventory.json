@@ -1,0 +1,212 @@
+{
+  "newsletter": {
+    "title": "Inside LLM Inference",
+    "url": "https://www.linkedin.com/newsletters/7462167537544364032/",
+    "editionCount": 30
+  },
+  "author": "Anurag Mohan",
+  "authorUrl": "https://www.linkedin.com/in/anurag-mohan-b80244171/",
+  "articles": [
+    {
+      "title": "Open article: Your Inference Server Passes CI—but Is It Safe to Ship? by Anurag Mohan • 6 min read",
+      "url": "https://www.linkedin.com/pulse/your-inference-server-passes-cibut-safe-ship-anurag-mohan-ess3e",
+      "kind": "newsletter"
+    },
+    {
+      "title": "Open article: Understanding Jev: What Changes When AI Returns Decisions Instead of Text? by Anurag Mohan • 11 min read",
+      "url": "https://www.linkedin.com/pulse/understanding-jev-what-changes-when-ai-returns-decisions-anurag-mohan-5cxge",
+      "kind": "newsletter"
+    },
+    {
+      "title": "Open article: Inside a Model Router by Anurag Mohan • 9 min read",
+      "url": "https://www.linkedin.com/pulse/inside-model-router-anurag-mohan-ouxxf",
+      "kind": "newsletter"
+    },
+    {
+      "title": "Open article: The Hidden Prompt: Why Multimodal Inference Is a Different Serving Problem by Anurag Mohan • 7 min read",
+      "url": "https://www.linkedin.com/pulse/hidden-prompt-why-multimodal-inference-different-serving-anurag-mohan-2dzgf",
+      "kind": "newsletter"
+    },
+    {
+      "title": "Open article: When One Prompt Becomes a Workflow by Anurag Mohan • 6 min read",
+      "url": "https://www.linkedin.com/pulse/when-one-prompt-becomes-workflow-anurag-mohan-far6c",
+      "kind": "newsletter"
+    },
+    {
+      "title": "Open article: Understanding Cold Starts in LLM Inference by Anurag Mohan • 8 min read",
+      "url": "https://www.linkedin.com/pulse/understanding-cold-starts-llm-inference-anurag-mohan-r5oec",
+      "kind": "newsletter"
+    },
+    {
+      "title": "Open article: Benchmarking LLM Inference—What Are We Actually Measuring? by Anurag Mohan • 7 min read",
+      "url": "https://www.linkedin.com/pulse/benchmarking-llm-inferencewhat-we-actually-measuring-anurag-mohan-gqljc",
+      "kind": "newsletter"
+    },
+    {
+      "title": "Open article: Model Routing: Choosing the Right LLM for Each Request by Anurag Mohan • 8 min read",
+      "url": "https://www.linkedin.com/pulse/model-routing-choosing-right-llm-each-request-anurag-mohan-uh5ve",
+      "kind": "newsletter"
+    },
+    {
+      "title": "Open article: From GPUs to NIM: Understanding NVIDIA’s LLM Inference Stack by Anurag Mohan • 12 min read",
+      "url": "https://www.linkedin.com/pulse/from-gpus-nim-understanding-nvidias-llm-inference-stack-anurag-mohan-bxwse",
+      "kind": "newsletter"
+    },
+    {
+      "title": "Open article: Understanding Capacity Planning for LLM Inference by Anurag Mohan • 8 min read",
+      "url": "https://www.linkedin.com/pulse/understanding-capacity-planning-llm-inference-anurag-mohan-oplvc",
+      "kind": "newsletter"
+    },
+    {
+      "title": "Open article: Understanding LLM-D Autoscaling, Observability, and Workload Behavior on OKE by Anurag Mohan • 6 min read",
+      "url": "https://www.linkedin.com/pulse/understanding-llm-d-autoscaling-observability-workload-anurag-mohan-cf8ie",
+      "kind": "newsletter"
+    },
+    {
+      "title": "Open article: From One Model Server to llm-d and CPU vLLM on Kubernetes by Anurag Mohan • 7 min read",
+      "url": "https://www.linkedin.com/pulse/from-one-model-server-llm-d-cpu-vllm-kubernetes-anurag-mohan-hv9te",
+      "kind": "newsletter"
+    },
+    {
+      "title": "Open article: Understanding Prefill/Decode Disaggregation and KV-Cache Transfer by Anurag Mohan • 6 min read",
+      "url": "https://www.linkedin.com/pulse/understanding-prefilldecode-disaggregation-kv-cache-transfer-mohan-ckarc",
+      "kind": "newsletter"
+    },
+    {
+      "title": "Open article: Building Inference Atlas by Anurag Mohan • 4 min read",
+      "url": "https://www.linkedin.com/pulse/building-inference-atlas-anurag-mohan-5unre",
+      "kind": "newsletter"
+    },
+    {
+      "title": "Open article: Understanding KV-Cache-Aware Routing by Anurag Mohan • 15 min read",
+      "url": "https://www.linkedin.com/pulse/understanding-kv-cache-aware-routing-anurag-mohan-t6xfe",
+      "kind": "newsletter"
+    },
+    {
+      "title": "Open article: Understanding llm-d and Distributed Inference by Anurag Mohan • 12 min read",
+      "url": "https://www.linkedin.com/pulse/understanding-llm-d-distributed-inference-anurag-mohan-jqjne",
+      "kind": "newsletter"
+    },
+    {
+      "title": "Open article: Understanding Memory Requirements for LLM Inference by Anurag Mohan • 9 min read",
+      "url": "https://www.linkedin.com/pulse/understanding-memory-requirements-llm-inference-anurag-mohan-kcpre",
+      "kind": "newsletter"
+    },
+    {
+      "title": "Open article: Understanding llama.cpp, GGUF, and Local CPU Inference by Anurag Mohan • 10 min read",
+      "url": "https://www.linkedin.com/pulse/understanding-llamacpp-gguf-local-cpu-inference-anurag-mohan-4hv1e",
+      "kind": "newsletter"
+    },
+    {
+      "title": "Open article: Building My Own Small Inference Cloud by Anurag Mohan • 9 min read",
+      "url": "https://www.linkedin.com/pulse/building-my-own-small-inference-cloud-anurag-mohan-mqdqe",
+      "kind": "newsletter"
+    },
+    {
+      "title": "Open article: LLM Inference Learning Series: Running a Local LLM Server Before Moving to GPUs by Anurag Mohan • 7 min read",
+      "url": "https://www.linkedin.com/pulse/llm-inference-learning-series-running-local-server-before-mohan-0y6oe",
+      "kind": "newsletter"
+    },
+    {
+      "title": "Open article: LLM Inference Challenges -\nUnderstanding Inference Metrics by Anurag Mohan • 11 min read",
+      "url": "https://www.linkedin.com/pulse/llm-inference-challenges-understanding-metrics-anurag-mohan-kirye",
+      "kind": "newsletter"
+    },
+    {
+      "title": "Open article: LLM Inference Challenges -Understanding the Modern AI Inference Stack by Anurag Mohan • 9 min read",
+      "url": "https://www.linkedin.com/pulse/llm-inference-challenges-understanding-modern-ai-stack-anurag-mohan-xjyve",
+      "kind": "newsletter"
+    },
+    {
+      "title": "Open article: LLM Inference Challenges:\nUnderstanding vLLM Architecture by Anurag Mohan • 8 min read",
+      "url": "https://www.linkedin.com/pulse/llm-inference-challenges-understanding-vllm-anurag-mohan-0d1ee",
+      "kind": "newsletter"
+    },
+    {
+      "title": "Open article: LLM Inference Challenges -\nUnderstanding PagedAttention by Anurag Mohan • 7 min read",
+      "url": "https://www.linkedin.com/pulse/llm-inference-challenges-understanding-anurag-mohan-sokpe",
+      "kind": "newsletter"
+    },
+    {
+      "title": "Open article: LLM Inference Challenges -\nUnderstanding Continuous Batching by Anurag Mohan • 11 min read",
+      "url": "https://www.linkedin.com/pulse/llm-inference-challenges-understanding-continuous-batching-mohan-i5bre",
+      "kind": "newsletter"
+    },
+    {
+      "title": "Open article: LLM Inference Challenges -\nUnderstanding Prefill vs Decode by Anurag Mohan • 4 min read",
+      "url": "https://www.linkedin.com/pulse/llm-inference-challenges-understanding-prefill-vs-decode-mohan-tl4fe",
+      "kind": "newsletter"
+    },
+    {
+      "title": "Open article: LLM Inference Challenges -\nUnderstanding GPU Communication & Networking by Anurag Mohan • 6 min read",
+      "url": "https://www.linkedin.com/pulse/llm-inference-challenges-understanding-gpu-networking-anurag-mohan-3omve",
+      "kind": "newsletter"
+    },
+    {
+      "title": "Open article: LLM Inference Challenges -\nUnderstanding Distributed Serving & Request Routing by Anurag Mohan • 4 min read",
+      "url": "https://www.linkedin.com/pulse/llm-inference-challenges-understanding-distributed-serving-mohan-ehxof",
+      "kind": "newsletter"
+    },
+    {
+      "title": "Open article: LLM Inference Challenges -\nUnderstanding Data Parallelism by Anurag Mohan • 5 min read",
+      "url": "https://www.linkedin.com/pulse/llm-inference-challenges-understanding-data-anurag-mohan-gvbne",
+      "kind": "newsletter"
+    },
+    {
+      "title": "Open article: Inside LLM Inference by Anurag Mohan • 4 min read",
+      "url": "https://www.linkedin.com/pulse/inside-llm-inference-anurag-mohan-o0hke",
+      "kind": "newsletter"
+    },
+    {
+      "title": "Understanding KV Cache",
+      "url": "https://www.linkedin.com/pulse/understanding-kv-caching-llm-inference-practical-intuitive-mohan-lcdee",
+      "kind": "earlier-article"
+    },
+    {
+      "title": "Memory Challenges in LLM Inference",
+      "url": "https://www.linkedin.com/pulse/llm-inference-challenges-memory-fragmentation-duplicate-anurag-mohan-8bjge",
+      "kind": "earlier-article"
+    },
+    {
+      "title": "GPU Utilization and Batching",
+      "url": "https://www.linkedin.com/pulse/llm-inference-challenges-part-3-anurag-mohan-cmare",
+      "kind": "earlier-article"
+    },
+    {
+      "title": "Why We Need Multiple GPUs",
+      "url": "https://www.linkedin.com/pulse/llm-inference-challenges-why-we-need-multiple-gpus-anurag-mohan-z7ede",
+      "kind": "earlier-article"
+    },
+    {
+      "title": "Understanding Tensor Parallelism",
+      "url": "https://www.linkedin.com/pulse/llm-inference-challenges-understanding-tensor-anurag-mohan-qvsve",
+      "kind": "earlier-article"
+    },
+    {
+      "title": "Understanding Pipeline Parallelism",
+      "url": "https://www.linkedin.com/pulse/llm-inference-challenges-pipeline-parallelism-anurag-mohan-vi12e",
+      "kind": "earlier-article"
+    },
+    {
+      "title": "The Best Model Router May Not Be the Best Conversation Router",
+      "url": "https://www.linkedin.com/pulse/best-model-router-may-conversation-anurag-mohan-etkfc",
+      "kind": "other-article"
+    },
+    {
+      "title": "LLM Inference Challenges — Building the Mental Model for Modern Inference Systems",
+      "url": "https://www.linkedin.com/pulse/llm-inference-challenges-building-mental-model-modern-anurag-mohan-xbm8e",
+      "kind": "other-article"
+    }
+  ],
+  "authorArticleList": "https://www.linkedin.com/in/anurag-mohan-b80244171/recent-activity/articles/",
+  "excludedArticles": [
+    {
+      "url": "https://www.linkedin.com/pulse/oci-devops-pipeline-codex-skills-fast-dev-deploys-anurag-mohan-rd2ye",
+      "reason": "DevOps deployment workflow, outside the inference article series."
+    },
+    {
+      "url": "https://www.linkedin.com/pulse/hybrid-cloud-reality-practical-approach-enterprise-anurag-mohan-fns2e",
+      "reason": "General hybrid cloud article, outside AI inference scope."
+    }
+  ]
+}

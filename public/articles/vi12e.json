@@ -1,0 +1,321 @@
+{
+  "id": "vi12e",
+  "title": "LLM Inference Challenges - Pipeline Parallelism",
+  "author": "Anurag Mohan",
+  "date": "May 13, 2026",
+  "url": "https://www.linkedin.com/pulse/llm-inference-challenges-pipeline-parallelism-anurag-mohan-vi12e",
+  "blocks": [
+    {
+      "links": [],
+      "text": "Understanding Pipeline Parallelism",
+      "type": "heading"
+    },
+    {
+      "links": [
+        {
+          "text": "previous part",
+          "url": "https://www.linkedin.com/pulse/llm-inference-challenges-understanding-tensor-anurag-mohan-qvsve"
+        }
+      ],
+      "text": "In the previous part, we explored tensor parallelism and how it helps split tensors across GPUs when a model becomes too large for a single device. That naturally leads to the next question. If tensor parallelism already helps with memory, why do we still need pipeline parallelism?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why do we need pipeline parallelism?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Tensor parallelism helps when the individual layers are too large to fit on one GPU. But for very large models, especially models with many large layers, that alone is not always enough. Communication can become heavy, and the system can become harder to scale efficiently.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So instead of splitting the tensors inside a layer, we can split the layers themselves.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That is pipeline parallelism.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What does pipeline parallelism mean?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Pipeline parallelism means dividing the model into stages and placing those stages on different GPUs.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "GPU group 1 → layers 1 to 20\nGPU group 2 → layers 21 to 40\nGPU group 3 → layers 41 to 60",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Now each GPU group handles a different part of the model.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How does it work?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "An input starts at the first stage.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The first GPU group processes its layers and produces an intermediate output. That output is then passed to the next GPU group, which continues the computation. Then the next group does the same.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So the data flows through the model stage by stage, like a pipeline.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why is it called pipeline parallelism?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Because it behaves like an assembly line.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "One stage finishes its work and passes the result to the next stage. Each GPU group works on a different part of the model, and the output keeps moving forward until the final result is produced.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What does this solve?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Pipeline parallelism reduces memory pressure by spreading the model across multiple GPUs.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Instead of one GPU holding all layers:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "each GPU group holds only a portion of the layers\nmemory usage per GPU goes down\nmuch larger models become possible",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is the tradeoff?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The main issue is that pipeline parallelism can create idle time.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "If one GPU group finishes early and the next group is still busy, the first group has to wait. That waiting time is often called a pipeline bubble.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So pipeline parallelism saves memory, but it can reduce efficiency if the pipeline is not kept full.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How is this different from tensor parallelism?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Tensor parallelism splits the tensors inside a layer. Pipeline parallelism splits the layers themselves.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That is the key difference.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Tensor parallelism:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "multiple GPUs work together on the same layer",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Pipeline parallelism:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "different GPU groups handle different layers",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Can they be used together?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Yes, and in large systems, they often are.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For very large models:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "pipeline parallelism splits the model into stages\ntensor parallelism splits the work inside each stage",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So one technique handles the broad model partitioning, and the other handles the computation inside each partition.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What does this look like in a real system?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Suppose we have a very large model with 80 layers.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "We divide the model into stages like this:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "GPU Group 1 → Layers 1–20\nGPU Group 2 → Layers 21–40\nGPU Group 3 → Layers 41–60\nGPU Group 4 → Layers 61–80",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This is pipeline parallelism.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Now assume each GPU group contains 8 GPUs.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Inside GPU Group 1:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Layers 1–20 are assigned to that group\nthe tensors inside those layers are split across the 8 GPUs\nall 8 GPUs collaborate to compute those layers",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This is tensor parallelism happening inside the pipeline stage.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Once GPU Group 1 finishes:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "the intermediate output is passed to GPU Group 2\nGPU Group 2 processes Layers 21–40\nagain using tensor parallelism internally",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So the model moves stage by stage through the pipeline, while each stage itself uses tensor parallelism for computation.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is the key intuition?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Pipeline parallelism splits the model vertically.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Tensor parallelism splits computation horizontally within each stage.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Together, they help balance:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "memory usage\ncommunication overhead\ncompute efficiency",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What comes next?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "At this point, the multi-GPU picture is becoming much clearer.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "We now understand:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "why a single GPU is not enough\nhow tensor parallelism splits tensors\nhow pipeline parallelism splits layers\nand how both techniques work together in large systems",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The next natural question is: How do these systems scale to many concurrent users?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That leads to data parallelism and distributed serving.",
+      "type": "paragraph"
+    }
+  ],
+  "images": [],
+  "bodyHash": "6675a0512bb1fdf80c148e8626031904580b0389b90370bcd4e179f14ad6f95c"
+}

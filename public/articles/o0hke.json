@@ -1,0 +1,321 @@
+{
+  "id": "o0hke",
+  "title": "Inside LLM Inference",
+  "author": "Anurag Mohan",
+  "date": "May 18, 2026",
+  "url": "https://www.linkedin.com/pulse/inside-llm-inference-anurag-mohan-o0hke",
+  "blocks": [
+    {
+      "links": [],
+      "text": "Why I Started This Newsletter",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Over the past few weeks, I’ve been spending a lot of time trying to understand what actually happens when large language models move from demos to real production systems.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Most discussions around LLMs focus on prompting, agents, or model capabilities. But once you start looking at how these systems are actually served at scale, a completely different set of problems appears.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How do these models fit into GPU memory? Why does latency increase with more users? What exactly is KV cache? Why do we need multiple GPUs? How do systems like tensor parallelism and pipeline parallelism actually work?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "I realized that many of these concepts are often explained in a very research-heavy or infrastructure-heavy way, which can make them difficult to approach if you are trying to build intuition first.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So I started writing a series of conversational articles where I try to simplify these ideas in the same way I’m learning them myself.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Initially, these articles were published individually on LinkedIn. But over time, I started seeing a lot of interest and engagement around these posts. That was honestly very motivating. It pushed me to keep learning more deeply and continue sharing what I was understanding along the way.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Since all of these articles are connected and build on top of one another, I wanted a single place where this learning journey could continue in a more structured way.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That’s why I’m starting this newsletter: Inside LLM Inference.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Going forward, this newsletter will become the home for all future articles in this series.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What We’ve Explored So Far",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Article 1 — Understanding KV Cache",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The first article focused on one of the most important optimizations in LLM inference: KV caching.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "I explored:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "why autoregressive generation is slow\nwhy models repeatedly recompute previous tokens\nhow KV cache avoids redundant computation\nand how this significantly improves token generation speed",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This article was mainly about building the intuition behind why KV cache exists in the first place.",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "Understanding KV Cache",
+          "url": "https://www.linkedin.com/pulse/understanding-kv-caching-llm-inference-practical-intuitive-mohan-lcdee"
+        }
+      ],
+      "text": "Understanding KV Cache",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Article 2 — Memory Challenges in LLM Inference",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Once KV cache enters the picture, memory becomes a much bigger problem than it initially appears.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "In this article, I explored:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "memory fragmentation\nmemory duplication\nwhy GPU memory utilization becomes difficult\nand how inference systems try to manage memory efficiently",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This was the point where inference started feeling less like “just running a model” and more like a systems engineering problem.",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "Memory Challenges in LLM Inference",
+          "url": "https://www.linkedin.com/pulse/llm-inference-challenges-memory-fragmentation-duplicate-anurag-mohan-8bjge"
+        }
+      ],
+      "text": "Memory Challenges in LLM Inference",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Article 3 — GPU Utilization and Batching",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "A powerful GPU does not automatically mean efficient inference.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This article focused on:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "why token generation is sequential\nwhy GPUs are often underutilized\nhow batching improves throughput\ncontinuous batching\nand the tradeoff between latency and throughput",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This article connected the earlier memory discussions with actual serving efficiency.",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "GPU Utilization and Batching",
+          "url": "https://www.linkedin.com/pulse/llm-inference-challenges-part-3-anurag-mohan-cmare"
+        }
+      ],
+      "text": "GPU Utilization and Batching",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Article 4 — Why We Need Multiple GPUs",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "At some point, a single GPU simply stops being enough.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This article explored two major problems:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "the model is too large to fit into memory\nthe system cannot handle enough concurrent users",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "I also discussed:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "what parameters and weights actually are\nhow model size translates into memory\nwhy larger models require distributed systems",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This article became the bridge into multi-GPU inference.",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "Why We Need Multiple GPUs",
+          "url": "https://www.linkedin.com/pulse/llm-inference-challenges-why-we-need-multiple-gpus-anurag-mohan-z7ede"
+        }
+      ],
+      "text": "Why We Need Multiple GPUs",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Article 5 — Understanding Tensor Parallelism",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "This article focused on one of the core techniques used when models become too large for a single GPU.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "I explored:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "what tensors actually are\nhow weights are stored as tensors\nhow tensors can be split across GPUs\nhow GPUs collaborate during computation\nand the tradeoffs introduced by GPU communication",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This was the first article where distributed inference concepts started becoming much more concrete.",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "Understanding Tensor Parallelism",
+          "url": "https://www.linkedin.com/pulse/llm-inference-challenges-understanding-tensor-anurag-mohan-qvsve"
+        }
+      ],
+      "text": "Understanding Tensor Parallelism",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Article 6 — Understanding Pipeline Parallelism",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "After tensor parallelism, the next question naturally became: What if we split the layers themselves instead of splitting tensors?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This article explored:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "pipeline parallelism\nmodel stages\npipeline bubbles\ncommunication flow between GPU groups\nand how tensor parallelism and pipeline parallelism are often combined in real systems",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This was also the point where the overall architecture of large-scale inference systems started becoming clearer.",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "Understanding Pipeline Parallelism",
+          "url": "https://www.linkedin.com/pulse/llm-inference-challenges-pipeline-parallelism-anurag-mohan-vi12e"
+        }
+      ],
+      "text": "Understanding Pipeline Parallelism",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What Comes Next?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The next step in this journey is understanding how these systems scale to large numbers of users.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So the next article in this newsletter will focus on:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "data parallelism\ndistributed serving\nrequest routing\nreplicas\nand how modern inference systems handle massive concurrency",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The deeper I go into inference, the more I realize that serving LLMs is not just an AI problem. It is also a distributed systems problem, a memory management problem, and an infrastructure problem.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "And honestly, that’s what makes it fascinating.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "If you enjoy breaking down complex systems into practical, intuition-first explanations, this newsletter will continue exploring these ideas one step at a time.",
+      "type": "paragraph"
+    }
+  ],
+  "images": [],
+  "bodyHash": "b5a2b91b26509b0a6be68845ee4e381ed423cd82ae35c68a7503286ca12f837d"
+}

@@ -1,0 +1,1146 @@
+{
+  "id": "i5bre",
+  "title": "LLM Inference Challenges - Understanding Continuous Batching",
+  "author": "Anurag Mohan",
+  "date": "June 9, 2026",
+  "url": "https://www.linkedin.com/pulse/llm-inference-challenges-understanding-continuous-batching-mohan-i5bre",
+  "blocks": [
+    {
+      "links": [],
+      "text": "LLM Inference Challenges (Part 11)",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Understanding Continuous Batching",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "In the previous part, we explored one of the most important runtime ideas in inference systems:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Prefill\nvs\nDecode ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Prefill is highly parallel. Decode is sequential. During prefill, the model processes many prompt tokens together. This creates large matrix operations and keeps GPUs busy. But during decode, the model generates one token at a time. That creates a very different problem. Even if we have powerful GPUs, tensor parallelism, pipeline parallelism, replicas, and high-speed networking, the system can still struggle because decode does not naturally give the GPU enough work. So the next question becomes:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How do modern inference systems\nkeep GPUs busy during decode? ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This leads us to:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Continuous Batching ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Continuous batching is one of the key ideas behind modern LLM serving systems.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why do we need batching again?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Before understanding continuous batching, let us quickly revisit batching. Suppose one user sends a request:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Request A ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "If we run only this one request on a GPU, the GPU may not be fully utilized. So instead, the system groups multiple requests together. Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Batch = [Request A, Request B, Request C, Request D] ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Now the GPU processes them together. This improves throughput because GPUs are much better at handling larger parallel workloads. So batching helps us turn:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "many small jobs ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "into:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "one larger GPU job ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "What is traditional batching?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "In traditional batching, the system waits for a group of requests. Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Request A\nRequest B\nRequest C\nRequest D ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Then it forms a batch:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Batch 1 = [A, B, C, D] ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Then the system runs this batch. The simple mental model is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "collect requests\nrun batch\nfinish batch\nstart next batch ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This works reasonably well when all requests are similar. But LLM inference requests are not similar.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why are LLM requests different?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "In LLM inference, every request can be different. One user may send a short prompt:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "\"Summarize this paragraph\" ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Another user may send a long prompt:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "\"Analyze this long document\" ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "One user may ask for a short answer. Another user may ask for a long explanation. So requests differ in:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "prompt length\noutput length\narrival time\nstopping point\nmemory usage ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This makes batching much harder.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What goes wrong with traditional batching?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Suppose we create a batch like this:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Batch = [A, B, C, D] ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Now each request starts generating tokens. But maybe Request A only needs 5 output tokens. Request B needs 20 output tokens. Request C needs 50 output tokens. Request D needs 100 output tokens. So they finish at different times. Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A finishes early\nB finishes later\nC keeps going\nD keeps going much longer ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Now what should the system do? In a naive batching system, the batch may stay tied together until the slowest request finishes. That means some slots become wasted.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What does a wasted slot mean?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Imagine the batch has 4 slots:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "[A, B, C, D] ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "After some decode steps, Request A finishes. Now the batch looks like:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "[empty, B, C, D] ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The system is still running decode steps. But one slot is empty. Later, Request B finishes:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "[empty, empty, C, D] ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Now half the batch is empty. The GPU is still doing work, but less efficiently. This is the core problem. Static batches become less useful as requests finish at different times.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why is this especially bad during decode?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Decode already has small workloads because generation happens one token at a time. So if the batch also becomes smaller over time, the problem becomes worse. The system now has:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "small decode work\n+\nshrinking batch ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That is bad for GPU utilization. The GPU wants large parallel work. But decode gives it small sequential work. And static batching makes that work shrink even more. The batch starts full:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "[A, B, C, D] ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Then becomes:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "[empty, B, C, D] ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Then:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "[empty, empty, C, D] ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Then:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "[empty, empty, empty, D] ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "At the end, we are almost back to serving one request. That is exactly what batching was supposed to avoid.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What does continuous batching change?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Continuous batching changes the batch while generation is happening. Instead of waiting for the entire batch to finish, the scheduler updates the batch continuously. When one request finishes, it leaves. When a new request is waiting, it enters. So the batch is not fixed. It is dynamic.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What does that look like?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Suppose we start with:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Batch = [A, B, C, D] ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "After a few decode steps, Request A finishes. Instead of leaving that slot empty, the scheduler inserts a new request.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Batch = [E, B, C, D] ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Later, Request B finishes. Another request enters.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Batch = [E, F, C, D] ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Then Request C finishes.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Batch = [E, F, G, D] ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So the batch keeps changing. The GPU keeps receiving useful work. That is continuous batching.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is the key idea?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Traditional batching works like this:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "create batch\nrun until batch is done\nstart next batch ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Continuous batching works like this:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "run one decode step\nremove finished requests\nadd waiting requests\nrun next decode step\nrepeat ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The batch is updated during generation. This is why continuous batching is also often described as:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "iteration-level scheduling ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Because the scheduler makes decisions at the level of each generation step.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is a decode iteration?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "A decode iteration is one step of token generation. For active requests, the model generates the next token. Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Step 1 → generate next token\nStep 2 → generate next token\nStep 3 → generate next token ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Each step updates the KV cache and produces the next token for each active request. With continuous batching, the scheduler can adjust the active batch between these steps.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What does the scheduler do?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The scheduler constantly decides:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Which requests should run now?\nWhich requests are finished?\nWhich new requests can enter?\nIs there enough KV cache memory?\nHow large should the active batch be? ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So the scheduler is not just forming batches once. It is managing the batch continuously. This is why modern inference systems are deeply scheduler-driven.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why not just run every request immediately?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "At first, it may seem like the best system should run every request as soon as it arrives. But this creates another problem. If the system runs very small batches immediately, throughput decreases. Why? Because every decode step has overhead. The system still needs to:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "launch GPU work\nread model weights\nread KV cache\nrun attention\nrun matrix operations\nsynchronize GPUs\nwrite updated KV cache ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "If the batch is very small, all of that overhead is paid for only a few tokens. Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Batch = [A] ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The GPU is doing a full decode step, but only one request gets one token. Now compare that with:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Batch = [A, B, C, D, E, F, G, H] ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The system still runs a decode step, but now many requests each receive a token. So the overhead is spread across more useful work. That is why very small batches often have poor throughput. The GPU may be active, but not efficiently used.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What does throughput mean here?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Throughput means how much useful work the system completes over time. For LLM serving, this is often measured as:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "tokens per second ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "If the system runs one tiny batch immediately, latency for that one request may look good. But total tokens per second may be low. If the system waits a little and forms a larger batch, total tokens per second may improve. But users may wait longer before their request starts. So the system is constantly balancing:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "latency\nvs\nthroughput ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Why does batching improve throughput?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Batching improves throughput because GPUs are designed for parallel computation. A GPU does not want to do a tiny amount of work. It wants large tensor operations. With a larger batch, the GPU can process more tokens together. That usually means:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "better GPU utilization\nmore tokens per second\nlower cost per token ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "But the system cannot wait forever to build a large batch. If it waits too long, user latency becomes bad. So the scheduler must find a balance.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is the latency-throughput tradeoff?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "If the scheduler runs requests immediately:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "low waiting time\nsmall batch\nlower throughput ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "If the scheduler waits to collect more requests:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "larger batch\nhigher throughput\nmore waiting time ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Continuous batching helps because new requests do not always need to wait for a full old batch to finish. They can enter between decode steps. So continuous batching gives the system a better way to balance:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "keep users moving\nwhile also keeping GPUs busy ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Does continuous batching reduce latency?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "It can help, but it is not magic. Continuous batching can reduce unnecessary waiting because new requests may enter as soon as there is room. In a traditional system, a new request might wait until the entire current batch finishes. Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Current batch still running\nNew request waits ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "With continuous batching:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Decode step finishes\nRequest A leaves\nRequest E enters\nNext decode step begins ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This can reduce queueing delay. But the scheduler still needs to be careful. If it admits too many requests, active users may slow down. If it admits too few requests, GPU utilization may drop. So continuous batching improves flexibility, but scheduling is still a tradeoff.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Does every new request enter immediately?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Not always. The scheduler still considers:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "available KV cache\ncurrent batch size\nprompt length\ndecode workload\nlatency targets\nfairness ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "A long prompt may require expensive prefill before it can join decode. A short request may be easier to admit. A system may also limit how many new requests enter at once to avoid hurting active users. So continuous batching is not simply:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "add every request immediately ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "It is more like:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "carefully admit requests\nwhile keeping the system efficient ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "How does prefill interact with continuous batching?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "A new request usually starts with prefill. The prompt must be processed first. Only after prefill does the request enter the decode loop. So there are two kinds of work:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "prefill work\ndecode work ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Prefill can be large and compute-heavy. Decode is smaller and repeated many times. A scheduler must decide how to mix them. If too much prefill is admitted at once, active decode requests may slow down. If decode is always prioritized, new requests may wait too long before their first token. So the scheduler must balance:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "time to first token\nvs\nongoing token generation speed ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "What is time to first token?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Time to first token means:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "how long the user waits\nbefore seeing the first generated token ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This depends heavily on prefill. If the prompt is long, prefill takes longer. If the system queue is busy, the request waits longer. So continuous batching is not only about total throughput. It also affects perceived responsiveness.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is token generation latency?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "After the first token appears, the user cares about how quickly the remaining tokens stream. This is related to decode speed. So there are two user-facing latency experiences:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "waiting for the first token ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "and:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "waiting between generated tokens ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Continuous batching affects both. If the scheduler is too aggressive, each request may wait longer between decode steps. If it is too conservative, GPU utilization may drop. This is why scheduling is such an important part of inference systems.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why does KV cache matter here?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Every active request needs KV cache. When a request enters the batch, the system must allocate KV cache memory for it. When a request finishes, its KV cache can be freed. So continuous batching is not just about compute. It is also about memory management. The scheduler cannot simply add unlimited requests. It must check:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Do we have enough KV cache space?\nCan this request fit?\nHow many tokens might it generate?\nWill adding this request hurt latency? ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This is where continuous batching starts connecting directly to paged attention.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why does continuous batching make memory harder?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Because requests are constantly entering and leaving. That means KV cache memory is constantly changing. Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Request A enters → allocate KV cache\nRequest B enters → allocate KV cache\nRequest A finishes → free KV cache\nRequest C enters → allocate KV cache\nRequest D grows → allocate more KV cache ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This creates a dynamic memory problem. The system needs to manage many growing and shrinking sequences efficiently. If memory management is poor, we get:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "fragmentation\nwasted memory\nfailed allocations\nlower batch size\nlower throughput ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So continuous batching improves GPU utilization, but it also increases the importance of KV cache management.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why does this lead to PagedAttention?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Once batches become dynamic, KV cache memory becomes harder to manage. Requests have different lengths. They grow token by token. They finish at different times. Their memory needs change continuously. So the system needs a smarter way to store and reuse KV cache memory. This is where PagedAttention becomes important. The rough connection is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Continuous batching\nkeeps the GPU busy\n\nPagedAttention\nhelps manage KV cache memory efficiently\nwhile batches change dynamically ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That is why these two ideas often appear together in modern serving systems.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How does continuous batching help decode?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Decode is inefficient because each request generates only one token at a time. But if we have many active requests, we can decode one token for many requests together. Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A → next token\nB → next token\nC → next token\nD → next token ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This gives the GPU more useful work. Continuous batching tries to keep this active set full. So instead of decode looking like:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "one request generating one token ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "it becomes:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "many requests generating one token each ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This is much better for throughput.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What does this look like inside a serving system?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "At a high level:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Waiting Queue\n    ↓\nScheduler\n    ↓\nActive Batch\n    ↓\nGPU Decode Step\n    ↓\nFinished requests leave\n    ↓\nNew requests enter\n    ↓\nRepeat ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The active batch is constantly changing. The scheduler keeps checking:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Who is waiting?\nWho is active?\nWho finished?\nWho needs memory?\nWho should run next? ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This loop is the heart of continuous batching.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How is this different from normal backend batching?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "In normal backend systems, batching often means:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "collect similar requests\nprocess them together\nreturn results ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "But LLM generation is different because requests are long-running. A request does not finish after one forward pass. It may need:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "10 decode steps\n50 decode steps\n500 decode steps ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So batching must happen across time. That is the key difference. Continuous batching is designed for long-running generation.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is the simplest intuition?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Imagine a bus. Traditional batching is like:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "fill the bus\ndrive until every passenger reaches their destination\nonly then pick up new passengers ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That is inefficient. Some passengers get off early, but their seats stay empty. Continuous batching is like:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "passengers get off at each stop\nnew passengers get on\nthe bus keeps moving ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The bus stays full more often. That is the intuition.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is the GPU version of this?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The GPU does not want empty seats. The batch is the bus. Requests are passengers. Finished requests leave. New requests enter. The scheduler keeps the bus full. That is continuous batching.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What problem does it solve?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Continuous batching mainly helps solve:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "decode underutilization ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "During decode, each request gives only a small amount of work. So the system needs many active requests to keep the GPU busy. Continuous batching helps maintain that active set.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What problem does it not solve?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Continuous batching does not remove the sequential nature of generation. The model still generates one token at a time. Token 2 still depends on token 1. Token 3 still depends on token 2. So continuous batching does not make one request magically parallel across future tokens. Instead, it improves system-level efficiency by batching many users together. The key distinction is:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Single request generation is still sequential.\n\nMany requests can be scheduled together efficiently. ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "How does this connect to replicas?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Each replica usually has its own scheduler. Example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Replica 1 → Scheduler 1 → Active batch\nReplica 2 → Scheduler 2 → Active batch\nReplica 3 → Scheduler 3 → Active batch ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "The router sends requests to replicas. Then each replica manages its own continuous batching loop. This means batching happens inside each serving replica. The router balances traffic across replicas. The scheduler balances work inside a replica.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why can’t we freely move requests between replicas?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Because each request has KV cache stored inside its assigned replica. If a request moves to another replica, its KV cache would also need to move. That is expensive. So once a request starts generating, it usually stays on the same replica. This is why earlier we talked about:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "sticky sessions\nor\nsession affinity ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Continuous batching works within that constraint.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What does continuous batching optimize for?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "It tries to improve:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "GPU utilization\nthroughput\nqueue waiting time\ndecode efficiency\nbatch occupancy ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "But it must also protect:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "latency\nfairness\nmemory safety\nuser experience ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So the scheduler is constantly making tradeoffs.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why is this harder than it sounds?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Because every request is different. Some requests have long prompts. Some have short prompts. Some generate short outputs. Some generate very long outputs. Some arrive during quiet periods. Some arrive during traffic spikes. Some need streaming responses. Some may stop early. Some may hit max token limits. So the scheduler is managing a moving target. There is no single fixed batch. There is only a constantly changing set of active sequences.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is the key mental model?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Traditional batching:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Batch is fixed.\nRequests enter together.\nRequests leave together. ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Continuous batching:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Batch is dynamic.\nRequests enter when there is room.\nRequests leave when they finish. ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That is the core idea.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why is continuous batching so important?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Because decode is where inference systems often struggle. Prefill gives the GPU large parallel work. Decode gives the GPU small repeated work. Continuous batching helps convert many small decode steps into one larger repeated workload. So instead of thinking:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "one user generating tokens ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "we should think:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "many users advancing one token at a time together ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That is much closer to how modern serving systems keep GPUs busy.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What does this teach us about inference systems?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "At this point, inference starts looking less like a simple model call. It looks more like a runtime scheduling problem. The system is constantly asking:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Which requests should run now?\nHow much memory do they need?\nHow do we keep the GPU busy?\nHow do we avoid making users wait too long?\nHow do we handle requests finishing at different times? ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This is why scheduler design is such a central part of modern LLM serving.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What comes next?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Now we understand why continuous batching matters. It keeps the active batch full during decode by allowing requests to enter and leave dynamically. But this creates another major problem. If requests are constantly entering, growing, and leaving, then KV cache memory becomes difficult to manage efficiently. The system needs a way to store KV cache without wasting huge amounts of GPU memory. That leads directly to one of the most important ideas in vLLM:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "PagedAttention ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "In the next part, we will explore:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "why KV cache memory becomes fragmented\nwhy fixed allocation wastes memory\nhow paging helps\nwhy PagedAttention is similar to virtual memory\nhow it works together with continuous batching ",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "Because continuous batching keeps the compute side busy. PagedAttention helps make the memory side efficient.",
+      "type": "paragraph"
+    }
+  ],
+  "images": [],
+  "bodyHash": "7d52488e651e2f68ae01941fa2b4a63c9e980577da86fe9165aa5bf9bd4a0ccd"
+}

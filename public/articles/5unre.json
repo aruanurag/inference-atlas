@@ -1,0 +1,541 @@
+{
+  "id": "5unre",
+  "title": "Building Inference Atlas",
+  "author": "Anurag Mohan",
+  "date": "July 28, 2026",
+  "url": "https://www.linkedin.com/pulse/building-inference-atlas-anurag-mohan-5unre",
+  "blocks": [
+    {
+      "links": [],
+      "text": "Why I Created an Open Atlas of the LLM Inference Ecosystem",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Over the last few months, I have been writing this LLM Inference Challenges series to understand how modern inference systems work.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "We started with concepts like KV cache, batching, GPU utilization, distributed inference, vLLM, llama.cpp, llm-d, routing, and many other topics.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "One thing I noticed while learning was that understanding the concepts was only half the challenge.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The other half was simply keeping up.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Every week, I would come across:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "a new inference engine\na new serving framework\nanother optimization paper\na new benchmark\nanother routing project\na model release\na hardware announcement\nor an interesting blog explaining something I hadn't seen before.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The pace of innovation in this space is incredible.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It is also overwhelming.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "After a while, I found myself asking the same question repeatedly:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "\"Where did I see that project?\"",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "or",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "\"What category does this tool belong to?\"",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "or",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "\"How does this fit into everything else?\"",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That question eventually became Inference Atlas.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is Inference Atlas?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Inference Atlas is an open-source, community-driven directory of the LLM inference ecosystem.",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "https://github.com/aruanurag/inference-atlas",
+          "url": "https://github.com/aruanurag/inference-atlas"
+        }
+      ],
+      "text": "GitHub: https://github.com/aruanurag/inference-atlas",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "https://www.inferenceatlas.org/",
+          "url": "https://www.inferenceatlas.org/"
+        }
+      ],
+      "text": "Website: https://www.inferenceatlas.org/",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The goal is intentionally simple.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Instead of trying to become another benchmark or another search engine, I wanted one place where I could quickly understand:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "what a project does\nwhere it fits in the inference stack\nwhy it exists\nand what related projects I should explore next.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Think of it as a map rather than a ranking.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why build another directory?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "There are already many excellent resources.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The problem isn't that information doesn't exist.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The problem is that it is scattered.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "One day I am reading:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "a GitHub repository",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The next day:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "a research paper",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Then:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "an NVIDIA blog",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Then:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "a LinkedIn post",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Then:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "documentation",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Then:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "a conference talk",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "After a few weeks, I realized I was spending more time trying to remember where something lived than actually learning it.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Inference Atlas became my way of organizing that knowledge.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The ecosystem is much larger than I expected",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "When I first started this series, I thought LLM inference mostly meant running a model.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Now I see an ecosystem that spans many layers.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For example:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Inference Engines",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "vLLM\nllama.cpp\nTensorRT-LLM\nSGLang\nTGI",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Serving & Distributed Inference",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "llm-d\nRay Serve\nKubernetes-based serving\nModel routers",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Optimization",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Continuous batching\nPagedAttention\nSpeculative decoding\nPrefix caching\nQuantization",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Hardware",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "CPUs\nGPUs\nNPUs\nAI accelerators",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Observability",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Metrics\nBenchmarking\nProfiling\nMonitoring",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Model Formats",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "GGUF\nSafetensors\nONNX\nTensorRT engines",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "And that's only a small part of it.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Every week, new projects appear.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Keeping track of all of them has become a challenge in itself.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why call it an Atlas?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "An atlas doesn't try to tell you where to go.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It simply helps you understand the landscape.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That is exactly what I wanted.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "I don't want Inference Atlas to say:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "\"This is the best project.\"",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Instead, I want it to answer:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What problem does this solve?\nWhere does it fit?\nWhat should I learn next?\nWhat are similar projects?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Sometimes, simply knowing that a project exists is enough to start learning.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Built for learners first",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Although anyone can use it, I built it primarily for people like me.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "People who are trying to understand LLM inference one concept at a time.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "If you've followed this series, you'll know I like building mental models.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Inference Atlas follows the same philosophy.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Instead of remembering hundreds of project names, I want to understand how they connect.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It will keep evolving",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "This isn't meant to be a static website.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "As the ecosystem evolves, the Atlas should evolve too.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Some categories will grow.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Some projects will disappear.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "New inference techniques will emerge.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That is completely expected.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "In many ways, the Atlas is another learning project.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "As I learn, it grows.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This is where I need your help",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "One of the reasons I made the project open source is because there is no way one person can keep up with everything happening in LLM inference.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "If you know about:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "an interesting inference project\na serving framework\nan optimization library\na benchmarking tool\na deployment platform\na useful paper\nor anything else that belongs in this ecosystem,",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "I would love your help.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "You can:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "⭐ Star the repository\nFork it and submit a Pull Request\nOpen a GitHub Issue with enough context for me to review and add it",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "My hope is that over time this becomes something the community helps build together.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why this fits into the series",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Although this article is a little different from the previous ones, I think it belongs here.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Learning LLM inference is no longer just about understanding transformers or GPUs.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It is also about navigating a rapidly evolving ecosystem.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Inference Atlas is my attempt to make that journey a little easier—for myself first, and hopefully for others too.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "If it saves someone an hour of searching, or helps them discover a project they wouldn't have found otherwise, then it has already done its job.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Useful Links",
+      "type": "heading"
+    },
+    {
+      "links": [
+        {
+          "text": "https://github.com/aruanurag/inference-atlas",
+          "url": "https://github.com/aruanurag/inference-atlas"
+        }
+      ],
+      "text": "Inference Atlas GitHub https://github.com/aruanurag/inference-atlas",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "https://www.inferenceatlas.org/",
+          "url": "https://www.inferenceatlas.org/"
+        }
+      ],
+      "text": "Inference Atlas Website https://www.inferenceatlas.org/",
+      "type": "paragraph"
+    }
+  ],
+  "images": [],
+  "bodyHash": "110ab2ebe7651db24c0576dc485d13a68a804346a4866a0644f6620c70f98903"
+}

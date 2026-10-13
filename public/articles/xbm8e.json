@@ -1,0 +1,471 @@
+{
+  "id": "xbm8e",
+  "title": "LLM Inference Challenges — Building the Mental Model for Modern Inference Systems",
+  "author": "Anurag Mohan",
+  "date": "June 4, 2026",
+  "url": "https://www.linkedin.com/pulse/llm-inference-challenges-building-mental-model-modern-anurag-mohan-xbm8e",
+  "blocks": [
+    {
+      "links": [],
+      "text": "Over the last few weeks, I’ve been exploring how modern LLM inference systems actually work internally.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What started with a simple question around KV cache slowly expanded into:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "batching\nGPU memory\nmulti-GPU inference\ndistributed serving\nreplicas\nGPU communication\nand finally runtime behavior during generation",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "While writing these articles, I noticed something interesting myself.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Many concepts keep reappearing:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "KV cache\nbatching\nparallelism\nreplicas\nscheduling\nGPU communication",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "At first I thought I was repeating things too much.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But over time I realized something: these concepts keep reappearing because modern inference systems themselves are deeply interconnected.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So before moving into:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "vLLM internals\npaged attention\ncontinuous batching\nadvanced schedulers",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "I wanted to take one step back and review the foundation we have built so far.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Part 1 — Understanding KV Cache",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "We started with one of the most important concepts in inference systems: KV cache.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This article explored:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "why transformers repeatedly recompute attention\nhow KV cache avoids redundant computation\nwhy generation becomes faster after caching\nand how memory usage grows during inference",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This became the starting point for understanding why inference systems are fundamentally memory-sensitive systems.",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "Understanding KV Cache",
+          "url": "https://www.linkedin.com/pulse/understanding-kv-caching-llm-inference-practical-intuitive-mohan-lcdee"
+        }
+      ],
+      "text": "Understanding KV Cache",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Part 2 — Memory Challenges During Inference",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "After understanding KV cache, the next question became: what happens when memory usage keeps growing?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This article explored:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "memory fragmentation\nduplication\ndynamic allocation problems\nwhy serving systems struggle with memory efficiency\nand why inference becomes difficult at scale",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This was also where the connection between user concurrency and memory pressure started becoming visible.",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "Memory Challenges During Inference",
+          "url": "https://www.linkedin.com/pulse/llm-inference-challenges-memory-fragmentation-duplicate-anurag-mohan-8bjge"
+        }
+      ],
+      "text": "Memory Challenges During Inference",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Part 3 — GPU Utilization & Batching",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "This article focused on one core idea: GPUs are efficient only when we keep them busy.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "We explored:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "why single requests underutilize GPUs\nhow batching improves throughput\nwhy requests are grouped together\nand how serving systems try to maximize utilization",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This became the foundation for understanding scheduling later.",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "GPU Utilization & Batching",
+          "url": "https://www.linkedin.com/pulse/llm-inference-challenges-part-3-anurag-mohan-cmare"
+        }
+      ],
+      "text": "GPU Utilization & Batching",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Part 4 — Why We Need Multiple GPUs",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "At this stage, one question became unavoidable: why is one GPU not enough anymore?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This article explored:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "model size vs GPU memory\nwhat parameters and weights actually are\nwhy large models cannot fit into one GPU\nand why throughput requirements also force distributed systems",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This was the transition point into multi-GPU inference.",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "Why We Need Multiple GPUs",
+          "url": "https://www.linkedin.com/pulse/llm-inference-challenges-why-we-need-multiple-gpus-anurag-mohan-z7ede"
+        }
+      ],
+      "text": "Why We Need Multiple GPUs",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Part 5 — Understanding Tensor Parallelism",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Once we understood why one GPU is insufficient, the next step was understanding how models are split across GPUs.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This article explored:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "what tensors actually are\nhow weights are represented as tensors\nhow tensor parallelism splits tensors across GPUs\nand how multiple GPUs cooperate on the same layer computation",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This introduced the idea that one layer itself may require many GPUs working together.",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "Understanding Tensor Parallelism",
+          "url": "https://www.linkedin.com/pulse/llm-inference-challenges-understanding-tensor-anurag-mohan-qvsve"
+        }
+      ],
+      "text": "Understanding Tensor Parallelism",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Part 6 — Understanding Pipeline Parallelism",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "After tensor parallelism, the next question became: what if even splitting tensors is not enough?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This article explored:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "splitting transformer layers into stages\nhow activations move through pipeline stages\nwhy pipeline bubbles happen\nand how tensor + pipeline parallelism work together in real systems",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This was where the inference system started feeling much more like distributed infrastructure.",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "Understanding Pipeline Parallelism",
+          "url": "https://www.linkedin.com/pulse/llm-inference-challenges-pipeline-parallelism-anurag-mohan-vi12e"
+        }
+      ],
+      "text": "Understanding Pipeline Parallelism",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Part 7 — Understanding Data Parallelism",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "At this point, the infrastructure picture became much larger.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This article explored:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "how entire model replicas are duplicated\nwhy data parallelism scales concurrent users\nhow replicas maintain independent KV cache\nand how tensor, pipeline, and data parallelism combine together",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This article also connected all three forms of parallelism into one complete mental model.",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "Understanding Data Parallelism",
+          "url": "https://www.linkedin.com/pulse/llm-inference-challenges-understanding-data-anurag-mohan-gvbne"
+        }
+      ],
+      "text": "Understanding Data Parallelism",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Part 8 — Distributed Serving & Request Routing",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Once replicas were clear, the next question became: how are requests actually managed?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This article explored:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "load balancers\nrouters\nrequest scheduling\nsession affinity\ndistributed serving systems\nand what a “replica” physically means",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This was the point where the mental model started shifting from: “running a model”",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "to:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "“operating a distributed GPU system.”",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "Distributed Serving & Request Routing",
+          "url": "https://www.linkedin.com/pulse/llm-inference-challenges-understanding-distributed-serving-mohan-ehxof"
+        }
+      ],
+      "text": "Distributed Serving & Request Routing",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Part 9 — GPU Communication & Networking",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "As systems scaled across many GPUs and servers, communication itself became a major topic.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This article explored:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "NVLink\nNVSwitch\nInfiniBand\nNCCL\ninter-node communication\nall-reduce operations\nand why networking becomes critical in large inference systems",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This was also where replicas started feeling less like servers and more like distributed supercomputing systems.",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "GPU Communication & Networking",
+          "url": "https://www.linkedin.com/newsletters/inside-llm-inference-7462167537544364032/"
+        }
+      ],
+      "text": "GPU Communication & Networking",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Part 10 — Understanding Prefill vs Decode",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "This article became one of the most important runtime concepts so far.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "We explored:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "why prompt processing is highly parallel\nwhy generation becomes sequential\nwhy decode underutilizes GPUs\nwhy pipeline bubbles appear\nand why scheduler design becomes so important",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This article connected almost everything learned earlier:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "batching\nKV cache\nreplicas\ntensor parallelism\npipeline parallelism\nand distributed serving",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "into one runtime mental model.",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "Understanding Prefill vs Decode",
+          "url": "https://www.linkedin.com/newsletters/inside-llm-inference-7462167537544364032/"
+        }
+      ],
+      "text": "Understanding Prefill vs Decode",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What Comes Next?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "At this point, the foundation feels much stronger.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "We now understand:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "how requests flow\nhow GPUs cooperate\nhow replicas scale\nhow communication happens\nand why inference systems become difficult during decode",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The next stage will focus much more on:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "vLLM architecture\ncontinuous batching\npaged attention\nscheduler design\nand modern inference optimizations",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "And honestly, this is where inference systems start becoming even more interesting.",
+      "type": "paragraph"
+    }
+  ],
+  "images": [],
+  "bodyHash": "e3f6e18863413889ac19ebd47911db39c32aa340626e32d39a3bc1ae67a5d476"
+}

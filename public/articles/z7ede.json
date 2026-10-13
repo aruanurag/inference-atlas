@@ -1,0 +1,231 @@
+{
+  "id": "z7ede",
+  "title": "LLM Inference Challenges - Why We Need Multiple GPUs",
+  "author": "Anurag Mohan",
+  "date": "May 5, 2026",
+  "url": "https://www.linkedin.com/pulse/llm-inference-challenges-why-we-need-multiple-gpus-anurag-mohan-z7ede",
+  "blocks": [
+    {
+      "links": [
+        {
+          "text": "previous parts",
+          "url": "https://www.linkedin.com/pulse/llm-inference-challenges-part-3-anurag-mohan-cmare"
+        }
+      ],
+      "text": "In the previous parts, we explored KV caching, memory challenges like fragmentation and duplication, and GPU utilization with batching . At this point, the system feels fairly optimized. But something still doesn’t sit right. What happens when a single GPU is not enough?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why would a single GPU not be enough?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "At first glance, one powerful GPU should be sufficient. But as systems scale, something starts to break. Sometimes, the model doesn’t even fit. Other times, even if it fits, the system still struggles to handle enough users. Let’s first understand the first case.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What does it mean when we say the model doesn’t fit?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "When we say a model is “too large,” what are we actually referring to? ",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "We often hear terms like 7B or 70B models. What does that really mean?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What does it mean when we say a 7B model?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "It does not mean 7 billion words or sentences. It means the model has 7 billion parameters. Each parameter is just a number like:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "0.12, -1.3, 2.7, ...",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "These numbers define how the model processes language.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What are parameters and weights?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The terms parameters and weights are often used interchangeably. In practice, they refer to the same thing. A parameter (or weight) is a number the model has learned during training. These numbers control how input text is transformed step by step inside the model. You can think of them as settings that shape the behavior of the model.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Where do these weights live?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "They are stored inside weight matrices. For example, inside a layer, we might have a matrix like:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "4096 × 4096",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "That is roughly:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "≈ 16 million parameters",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "But that is just one matrix. A full model has many layers and many matrices per layer. All of these together add up to billions of parameters.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How does this translate to memory?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Each parameter takes memory. If we store parameters in FP16, each parameter takes 2 bytes. So:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "7 billion × 2 bytes ≈ 14 GB",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So a 7B model is roughly 14GB, just for the weights.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Is that all the memory we need?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Not really. We also need KV cache, which grows with tokens and users, and intermediate activations, which are temporary during computation . So actual memory usage becomes:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "weights + KV cache + activations",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "This can easily exceed the capacity of a single GPU. So one problem becomes clear. The model is simply too large to fit into one GPU.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What if the model does fit?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Let’s assume the model fits into a single GPU. Are we done? Not necessarily.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why can’t one GPU handle all users?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Token generation is sequential. Each request does not fully utilize the GPU. Batching helps, but has limits . Requests arrive at different times, have different lengths, and finish at different times. Even with continuous batching, utilization is not perfect.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What does this look like in practice?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Imagine one GPU can handle around 50 active requests efficiently, but the system has 500 users. Requests start waiting. Latency increases. User experience degrades. So even if the model fits, one GPU may not handle enough users.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What are the actual problems then?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "At this point, we have two different problems. ",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The model is too large to fit. \nThe system needs to handle more users. ",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "These problems may look similar, but they are fundamentally different.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is the key difference?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The model size problem is a memory issue. The throughput problem is a compute issue.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How do we solve this?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "We introduce multiple GPUs. But using multiple GPUs is not just about adding more hardware. We need to decide how to use them. We can split the model across GPUs, replicate the model across GPUs, or combine both approaches. Each comes with its own tradeoffs.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What comes next?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Now that we understand what parameters (weights) are, how model size translates to memory, and why a single GPU is not enough, the next question becomes natural. How do we split a model across GPUs?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "In the next part, we will explore this using tensor parallelism and pipeline parallelism.",
+      "type": "paragraph"
+    }
+  ],
+  "images": [],
+  "bodyHash": "5ba2677f3a1e73c0e6567beeafefcc2af9b4f30c8d92dda8988102c553129f3b"
+}

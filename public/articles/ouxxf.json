@@ -1,0 +1,380 @@
+{
+  "id": "ouxxf",
+  "title": "Inside a Model Router",
+  "author": "Anurag Mohan",
+  "date": "September 23, 2026",
+  "url": "https://www.linkedin.com/pulse/inside-model-router-anurag-mohan-ouxxf",
+  "blocks": [
+    {
+      "links": [],
+      "text": "What Actually Happens Before Your Prompt Reaches an LLM",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "When I first started looking at model routers, the idea sounded straightforward: send simple requests to a smaller, cheaper model and difficult ones to a stronger model.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That is part of the story. But it also raises an important question:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Does every team now need to build its own router?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "No. Most teams should not start by training a router or writing a large routing service. What they need first is a clear routing policy—and they can often implement that policy with a managed router or an LLM gateway.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The distinction matters because the most visible benefit of routing is cost reduction, but a useful router is not only a cost tool. It is an application-and-serving decision system. It decides what quality is acceptable, which capabilities are mandatory, how much latency is tolerable, whether a conversation should stay on the same model, and what to do when an endpoint fails.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That is why I now think of model routing as a ",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "system problem, not a pricing spreadsheet.",
+      "type": "code"
+    },
+    {
+      "links": [],
+      "text": "So what can an existing router do, and when would I need my own policy?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Existing routers and gateways already solve a lot of the mechanics: model pools, retries, provider failover, health checks, rate limits, budget controls, and sometimes prompt classification or model-tier selection.",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "Microsoft Foundry’s model router",
+          "url": "https://learn.microsoft.com/en-us/azure/foundry/openai/concepts/model-router"
+        },
+        {
+          "text": "LiteLLM’s Auto Routing",
+          "url": "https://docs.litellm.ai/docs/proxy/auto_routing"
+        }
+      ],
+      "text": "They are not limited to cost. For example, Microsoft Foundry’s model router lets a team choose a model subset and route in Cost, Quality, or Balanced modes, with automatic failover. LiteLLM’s Auto Routing supports heuristic, LLM, semantic, and custom classifiers, as well as optional session affinity. Provider-routing layers can also prioritize health, latency, throughput, parameter support, and data policy—not only price.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That gets many teams far enough.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But a general-purpose router cannot know what quality means in your application. It does not know that a support answer must cite a policy correctly, that an extraction workflow can tolerate an occasional review queue but not malformed JSON, or that an agent’s next tool call is more important than beautiful prose.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That is when a custom policy becomes valuable. And “custom” does not necessarily mean a custom-trained router model. It may be a small policy layer on top of a gateway:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Keep all ongoing customer conversations on the same approved model unless a high-risk task requires escalation.\nSend document extraction to a smaller, validated model, but route any ambiguous field to a stronger model.\nAllow only models and regions that meet a particular data policy.\nRoute agent steps that require reliable tool calls differently from ordinary chat.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The existing router can still execute the policy. Your application supplies the judgment it cannot infer on its own.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The word “router” hides four different decisions",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Consider a customer-support assistant that receives this request:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "“Read this 40-page contract, identify whether the cancellation clause conflicts with our policy, and return the issues as JSON.”",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Several routers may be involved, but they are doing very different jobs.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Model routing decides which model should answer. A smaller model might handle ordinary FAQ responses, while this request may need a model with a long enough context window, strong document reasoning, and reliable structured output.",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "OpenRouter’s provider-routing documentation",
+          "url": "https://openrouter.ai/docs/guides/routing/provider-selection"
+        }
+      ],
+      "text": "Provider or endpoint routing decides where the selected model should run. If the logical model is available from multiple providers, the router might avoid one endpoint because it is unhealthy, does not support the requested JSON mode, violates the data policy, or has poor p95 latency. The model choice may stay the same while the endpoint changes. OpenRouter’s provider-routing documentation is a useful public example of this layer.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Inference routing happens inside the serving fleet. If you self-host the selected model on several replicas, the system decides which replica should execute this request. For a follow-up turn, the best replica may be the one that already holds the conversation’s KV cache. Sending it elsewhere can mean prefill work all over again.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "MoE routing happens inside the model itself. If the selected model is a Mixture-of-Experts model, an internal gate chooses experts while processing tokens. Imagine a model with eight feed-forward experts that activates the best two for a token at one MoE layer. The next token—or the next MoE layer—can choose a different pair, and their outputs are combined using the gate’s weights.",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "Switch Transformers paper",
+          "url": "https://arxiv.org/abs/2101.03961"
+        }
+      ],
+      "text": "The application did not choose “expert 3 for this customer contract.” It chose the overall model before the request began. The MoE gate chooses computation paths inside that model, token by token. MoE routing has its own serving concerns: uneven expert load, token movement between GPUs, and expert-parallel communication can all affect latency and throughput. The Switch Transformers paper is a good reference if you want to go deeper into that internal layer.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The shared word routing is misleading. Model routing is an application decision. Provider and inference routing are serving decisions. MoE routing is part of the model’s forward pass.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What does a model router decide before it scores quality?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "It should first remove candidates that cannot satisfy the request.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For the contract example, a model is not eligible if it cannot fit the context, produce the required JSON schema, comply with the data policy, or support any needed tools. These are hard gates, not trade-offs. A cheap model that cannot reliably meet the interface contract is not actually cheaper; it creates downstream repair work or failure.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Only after filtering does the router ask questions such as:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What task is this: extraction, summarization, reasoning, code, planning, or conversation?\nHow much input does it contain, and how long is the expected output?\nHow severe is a wrong answer?\nIs this the start of a conversation or a continuation of one?\nWhat are the user’s latency, cost, and quality expectations?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "This is why “route by complexity” is too shallow. A short prompt can require difficult reasoning. A simple request can contain a huge document. A user might prefer a slightly slower answer if it is correct and correctly formatted.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Why token shape and cache affinity turn this into a system problem",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "The advertised price of a model does not tell us the cost or latency of a specific request.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For a long RAG or document-analysis prompt, prefill can dominate because the model must process all of the input before producing the first token. For a creative-writing request with a short prompt and a long response, decode work and output-token cost can dominate instead.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "So a useful router estimates input and output separately. It asks, “What will this model cost and how long will it take for this token shape?” not simply, “Which model has the lower token price?”",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Then there is conversation state. The KV cache created for one model cannot be reused by a different model. Even with the same model, moving to another replica can lose cache locality unless the serving layer can route cache-aware traffic or transfer the cache.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That creates real trade-offs. A model that looks slightly more expensive on a static price sheet may produce a faster and cheaper next turn if the relevant prefix is already cached. A less expensive model may require a full 40K-token prefill, change response style mid-conversation, and make the user feel as if the assistant has lost context.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Managed routers can help with this, but it is important to understand their limits. For example, Foundry documents session affinity as an attempt to keep related turns on the same eligible model; it can improve the opportunity for cache reuse, but it does not inspect cache state or guarantee a cache hit. The final cache-aware replica decision remains an inference-serving concern.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "That connection—between model choice, request shape, conversation state, and live infrastructure—is exactly why routing is a system problem.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The same request can follow a direct route, a cascade, or a fallback",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "These three patterns are often discussed together, but they solve different problems.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Direct routing makes one decision before generation. The router sees that the contract request needs long context, policy reasoning, and JSON output, so it sends the request directly to a model that meets those requirements. This is often the best path when latency matters and the router already has enough confidence.",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "FrugalGPT",
+          "url": "https://arxiv.org/html/2305.05176v1"
+        }
+      ],
+      "text": "A cascade deliberately makes more than one decision. Think of a common support question such as “How do I reset my password?” A lower-cost model can generate a response first. If a task-specific evaluator considers it reliable enough, the system returns it. If not, it escalates to a stronger model. A cascade can save money when most requests are easy, but it pays for extra work and adds tail latency whenever the first answer is rejected. FrugalGPT is a useful reference for this pattern.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "A fallback is an availability path, not a quality path. The system has already chosen the right model for the contract analysis, but its preferred provider times out. It can retry through another endpoint serving that model, or move to a compatible fallback model after checking the same context, JSON, tool, and policy constraints. The fallback is not saying, “This request is easier than we thought.” It is saying, “The preferred route is unavailable.”",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The metrics must reflect that difference. A high cascade-escalation rate may reveal a weak first-stage quality policy. A high fallback rate may reveal endpoint health or capacity problems.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "What is the router really optimizing?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "After hard constraints are applied, the decision can be thought of as:",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "predicted quality − cost penalty − latency penalty − failure risk + cache and session-affinity benefit",
+      "type": "paragraph"
+    },
+    {
+      "links": [
+        {
+          "text": "RouteLLM",
+          "url": "https://arxiv.org/html/2406.18665v4"
+        }
+      ],
+      "text": "The implementation might be a rules engine, a small classifier, an LLM classifier, a learned ranker, or a mix of all of them. RouteLLM, for example, frames routing as estimating whether a stronger model is likely to beat a weaker one for a prompt, then applying a quality-versus-cost threshold.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "But that formula only becomes useful once the product has supplied the weights. Is a 1% quality improvement worth 3× the cost? Is it worth 500 ms more latency? Does the answer feed a human, a legal workflow, or an autonomous tool call? Does preserving the conversation’s cached state matter more than using the theoretically best model for one turn?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "There is no universal answer. That is why a generic router is a strong starting point, but a mature system eventually needs workload-specific evaluation and policy.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "How do we know the router is helping?",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Average cost is not enough. A router can lower average cost simply by sending too many difficult requests to a small model.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "I would measure quality by task slice, expensive-model call rate, actual cost including retries and cascades, time to first token and p95/p99 latency, tool and JSON failure rates, cache-hit behavior, session stickiness, and routing regret—cases where an eligible alternative was clearly better.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "For offline evaluation, run representative prompts through several candidates and compare the results using ground truth, human review, or carefully designed LLM-as-a-judge evaluation. For online evaluation, log the route reason, model version, input/output shape, cache and endpoint state, fallback behavior, and user outcome together. Otherwise, the router becomes very hard to debug as models, pricing, and traffic patterns change.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "My takeaway",
+      "type": "heading"
+    },
+    {
+      "links": [],
+      "text": "Not everyone needs to build a model router from scratch. But everyone who uses more than one model eventually needs to decide what they are optimizing—and whether a generic router understands the constraints that matter to their application.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "The moment we care about capability contracts, quality, latency, prefill and decode, KV-cache locality, endpoint health, agent behavior, and conversation continuity, model routing stops being “send easy prompts to a cheaper model.”",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "It becomes a system problem.",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "And that is the question I would ask before adopting any router: what decision is it making for me, and which decisions still need to come from my application and serving stack?",
+      "type": "paragraph"
+    },
+    {
+      "links": [],
+      "text": "Further reading",
+      "type": "heading"
+    },
+    {
+      "links": [
+        {
+          "text": "Microsoft Foundry model router",
+          "url": "https://learn.microsoft.com/en-us/azure/foundry/openai/concepts/model-router"
+        },
+        {
+          "text": "LiteLLM Auto Routing",
+          "url": "https://docs.litellm.ai/docs/proxy/auto_routing"
+        },
+        {
+          "text": "OpenRouter provider routing",
+          "url": "https://openrouter.ai/docs/guides/routing/provider-selection"
+        },
+        {
+          "text": "RouteLLM: Learning to Route LLMs with Preference Data",
+          "url": "https://arxiv.org/html/2406.18665v4"
+        },
+        {
+          "text": "FrugalGPT: How to Use Large Language Models While Reducing Cost and Improving Performance",
+          "url": "https://arxiv.org/html/2305.05176v1"
+        },
+        {
+          "text": "Switch Transformers",
+          "url": "https://arxiv.org/abs/2101.03961"
+        }
+      ],
+      "text": "Microsoft Foundry model router\nLiteLLM Auto Routing\nOpenRouter provider routing\nRouteLLM: Learning to Route LLMs with Preference Data\nFrugalGPT: How to Use Large Language Models While Reducing Cost and Improving Performance\nSwitch Transformers",
+      "type": "paragraph"
+    }
+  ],
+  "images": [],
+  "bodyHash": "dcdccb5d9ecff57d1829a71f1f953ff20cfa2577fdf0a907a9e36df3fc396d7e"
+}
